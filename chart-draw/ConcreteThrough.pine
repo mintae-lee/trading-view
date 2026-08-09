@@ -1,0 +1,101 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © busiruk
+
+//@version=6
+indicator("Concrete Through", overlay=true)
+
+// ── Inputs ──
+maLen1      = input.int(112, "Bottom Zone MA Length 1", group="Bottom Zone Condition")
+maLen2      = input.int(224, "Bottom Zone MA Length 2", group="Bottom Zone Condition")
+
+pivotLeft   = input.int(5, "Hill Detection Left Bars", group="Hill Condition")
+pivotRight  = input.int(5, "Hill Detection Right Bars (Confirmation Delay)", group="Hill Condition")
+
+volLen      = input.int(20, "Volume Average Length", group="Breakout Condition")
+volMult     = input.float(1.5, "Volume Spike Multiplier", group="Breakout Condition")
+
+// ── 1. Bottom zone check (reverse alignment + price below MAs) ──
+ma1 = ta.sma(close, maLen1)
+ma2 = ta.sma(close, maLen2)
+
+plot(ma1, title="MA112", color=color.new(#FF69B4, 0), linewidth=1)
+plot(ma2, title="MA224", color=color.green, linewidth=1)
+
+isBelowMA      = close < ma1 and close < ma2
+isReverseAlign = ma1 < ma2
+isBottomZone   = isBelowMA and isReverseAlign
+
+// ── MA 5
+ma5  = ta.sma(close, 5)
+// ma448  = ta.sma(close, 448)
+
+plot(ma5,  title="MA5",  color=color.rgb(169, 169, 169), linewidth=1)
+// plot(ma448, title="MA448", color=color.new(#ff9900, 46), linewidth=1)
+
+// ── 2. Hill (previous swing high) tracking ──
+pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
+
+var float hillLevel = na
+var int   hillBar   = na
+
+if not na(pivotHigh)
+    hillLevel := pivotHigh
+    hillBar   := bar_index - pivotRight
+
+// ── Hill breakout candle marker (first bullish candle exceeding hill's high) ──
+var bool hillBreakMarked = false
+
+if not na(pivotHigh)
+    hillLevel := pivotHigh
+    hillBar   := bar_index - pivotRight
+    hillBreakMarked := false   // reset marker state for the new hill
+
+isBullishCandle = close > open
+bodySize   = close - open
+rangeSize  = high - low
+bodyRatio  = rangeSize > 0 ? bodySize / rangeSize : 0
+isStrongBody = bodyRatio >= 0.6
+
+breakHillHigh = not na(hillLevel) and high > hillLevel and isBullishCandle and isStrongBody and not hillBreakMarked
+
+if breakHillHigh
+    hillBreakMarked := true
+
+plotshape(breakHillHigh, title="Hill Breakout Candle", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.green, 0), size=size.tiny)
+
+// ── 3. Breakout (Concrete) condition: hill breakout + volume spike + in bottom zone ──
+volSpike     = volume > ta.sma(volume, volLen) * volMult
+crossHill    = ta.crossover(close, hillLevel)   // always called every bar
+breakout     = not na(hillLevel) and crossHill
+concreteCond = breakout and volSpike and isBottomZone
+
+plotshape(concreteCond, title="Concrete", style=shape.labelup,
+     location=location.belowbar, color=color.new(#8B7355, 0),
+     textcolor=color.white, text="Concrete", size=size.small)
+
+// ── 4. Support line (breakout bar's open price as horizontal support) ──
+var line supportLine = na
+var float supportPrice = na
+var bool  supportBroken = false
+
+if concreteCond
+    if not na(supportLine)
+        line.delete(supportLine)
+    supportLine := line.new(bar_index, open, bar_index + 200, open,
+         color=color.new(#8B7355, 0), style=line.style_dashed, width=2, extend=extend.right)
+    supportPrice := open
+    supportBroken := false
+
+// ── 5. Support break warning (stop-loss alert) ──
+if not na(supportPrice) and not supportBroken and close < supportPrice
+    supportBroken := true
+    label.new(bar_index, low, "Loss", color=color.new(color.red, 0),
+         textcolor=color.white, style=label.style_label_up, size=size.small)
+
+// ── Hill marker (only shown for the hill that triggered a Concrete signal) ──
+if concreteCond
+    label.new(hillBar, hillLevel, "", style=label.style_circle,
+         color=color.new(color.orange, 20), size=size.tiny)
+
+bgcolor(isBottomZone ? color.new(color.blue, 80) : na, title="Bottom Zone (Reverse Align + Below MA) Background")
