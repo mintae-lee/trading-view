@@ -2,7 +2,7 @@
 // © busiruk
 
 //@version=6
-indicator("Concrete Through", overlay=true)
+indicator("하락후지지 공구리돌파", overlay=true)
 
 // ── Inputs ──
 maLen1      = input.int(112, "Bottom Zone MA Length 1", group="Bottom Zone Condition")
@@ -18,7 +18,7 @@ volMult     = input.float(1.5, "Volume Spike Multiplier", group="Breakout Condit
 ma1 = ta.sma(close, maLen1)
 ma2 = ta.sma(close, maLen2)
 
-plot(ma1, title="MA112", color=color.new(#FF69B4, 0), linewidth=1)
+plot(ma1, title="MA112", color=color.new(#b91e6b, 0), linewidth=2)
 plot(ma2, title="MA224", color=color.green, linewidth=1)
 
 isBelowMA      = close < ma1 and close < ma2
@@ -29,7 +29,7 @@ isBottomZone   = isBelowMA and isReverseAlign
 ma5  = ta.sma(close, 5)
 // ma448  = ta.sma(close, 448)
 
-plot(ma5,  title="MA5",  color=color.rgb(169, 169, 169), linewidth=1)
+plot(ma5,  title="MA5",  color=color.rgb(255, 255, 255), linewidth=2)
 // plot(ma448, title="MA448", color=color.new(#ff9900, 46), linewidth=1)
 
 // ── 2. Hill (previous swing high) tracking ──

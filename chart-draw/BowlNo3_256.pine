@@ -1,0 +1,91 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// 주가가 급락 후 가격 조정을 거치며 224일선 아래에서 횡보하는 '공구리(바닥 다지기)' 구간
+// 5일 이동평균선이 20일 이동평균선을 상향 돌파(Golden Cross)할 때를 신호로 포착합니다.
+
+//@version=6
+indicator("밥그릇3번-256법", overlay=true)
+
+// ══════════════════════════════════════
+// 1. 이동평균선 설정
+// ══════════════════════════════════════
+ma5Len   = input.int(5,   "5일선", group="이동평균선")
+ma20Len  = input.int(20,  "20일선", group="이동평균선")
+ma60Len  = input.int(60,  "60일선", group="이동평균선")
+ma224Len = input.int(224, "224일선", group="이동평균선")
+
+ma5   = ta.sma(close, ma5Len)
+ma20  = ta.sma(close, ma20Len)
+ma60  = ta.sma(close, ma60Len)
+ma224 = ta.sma(close, ma224Len)
+
+plot(ma5,   title="MA5",   color=color.new(color.white, 0), linewidth=1)
+plot(ma20,  title="MA20",  color=color.new(color.blue, 0), linewidth=1)
+plot(ma60,  title="MA60",  color=color.new(color.orange, 0), linewidth=3)
+plot(ma224, title="MA224", color=color.new(color.red, 0), linewidth=1)
+
+// ══════════════════════════════════════
+// 2. 하락 후 224일선 아래 횡보(공구리) 구간 감지
+// ══════════════════════════════════════
+consolLen    = input.int(20, "횡보 판단 기간", group="공구리 구간")
+consolPctMax = input.float(8.0, "횡보 판단 최대 변동폭(%)", group="공구리 구간")
+
+rangeHigh = ta.highest(high, consolLen)
+rangeLow  = ta.lowest(low, consolLen)
+rangePct  = (rangeHigh - rangeLow) / rangeLow * 100
+
+isSideways   = rangePct <= consolPctMax
+isBelow224   = close < ma224
+isConsolZone = isSideways and isBelow224
+
+bgcolor(isConsolZone ? color.new(color.maroon, 90) : na, title="공구리(횡보) 구간 표시")
+
+// ══════════════════════════════════════
+// 3. 골든크로스 발생 (5일선이 20일선 상향돌파, 20일선 위 확인)
+// ══════════════════════════════════════
+goldenCross = ta.crossover(ma5, ma20)   // 매 봉 항상 호출
+aboveMA20   = close > ma20
+
+goldenCrossValid = goldenCross and aboveMA20 and isConsolZone
+
+plotshape(goldenCrossValid, title="골든크로스", style=shape.flag,
+     location=location.belowbar, color=color.new(color.yellow, 0),
+     size=size.small, text="골든크로스", textcolor=color.yellow)
+
+// ── 골든크로스 발생 시 "매수 대기" 상태 진입 ──
+maxWaitBars = input.int(60, "골든크로스 후 대기 최대 봉수(초과시 취소)", group="매수 신호")
+
+var bool waitingBreakout = false
+var int  goldenCrossBar  = na
+
+if goldenCrossValid
+    waitingBreakout := true
+    goldenCrossBar  := bar_index
+
+// 대기 시간 초과 시 신호 취소 (오래된 골든크로스는 무효화)
+if waitingBreakout and not na(goldenCrossBar) and (bar_index - goldenCrossBar > maxWaitBars)
+    waitingBreakout := false
+
+// ══════════════════════════════════════
+// 4. 224일선 돌파 = 최종 매수 타점
+// ══════════════════════════════════════
+breakout224 = ta.crossover(close, ma224)   // 매 봉 항상 호출
+buySignal256 = breakout224 and waitingBreakout
+
+if buySignal256
+    waitingBreakout := false   // 신호 발생 후 대기 상태 해제 (다음 사이클 준비)
+
+plotshape(buySignal256, title="256 매수", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.lime, 0),
+     size=size.tiny, text="256")
+
+// ══════════════════════════════════════
+// 5. 이동평균선 정렬 조건 (60일선 > 5일선 > 20일선 순서, 5일선 상승 중)
+// ══════════════════════════════════════
+isMaOrder60_5_20 = ma60 > ma5 and ma5 > ma20
+isMa5Rising = ma5 > ma5[1]
+
+maOrderSignal = isMaOrder60_5_20 and isMa5Rising
+
+plotshape(maOrderSignal, title="MA정렬 60-5-20", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.white, 0),
+     size=size.tiny, text="256")
