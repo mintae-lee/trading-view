@@ -1,0 +1,77 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © busiruk
+
+//@version=6
+indicator("5일하락 후 장대양봉 돌파", overlay=true)
+
+// ── Inputs ──
+declineLen  = input.int(5, "하락 확인 기간(봉수)", group="하락 구간 조건")
+bodyLen     = input.int(20, "평균 몸통 계산 기간", group="양봉 강도 조건")
+bodyMult    = input.float(1.3, "몸통 크기 배수(평균 대비)", group="양봉 강도 조건")
+volLen      = input.int(20, "거래량 평균 기간", group="거래량 조건")
+volMult     = input.float(1.2, "거래량 급증 배수", group="거래량 조건")
+
+trendLen    = input.int(20, "하락추세 확인 기간", group="20일 추세 조건")
+
+baseLen      = input.int(5, "베이스 확인 기간(신호 전)", group="베이스 조건")
+baseRangeMax = input.float(10.0, "베이스 최대 변동폭(%)", group="베이스 조건")
+
+closePosMin = input.float(0.75, "종가 위치 최소값(0~1)", group="강한 종가 조건")
+
+steepMaxPct = input.float(-35.0, "20일 최대 하락률(%) 제한", group="급락속도 조건")
+
+// ── 5일선(SMA) ──
+ma5 = ta.sma(close, declineLen)
+plot(ma5, title="MA5", color=color.new(color.gray, 0), linewidth=1)
+
+// ── 1. 하락 구간 판단 ──
+bearishCount = 0
+for i = 1 to declineLen
+    if close[i] < open[i]
+        bearishCount += 1
+
+majorityBearish = bearishCount >= declineLen - 2
+ma5DownOverall  = ma5[declineLen] > ma5
+
+isDeclineZone = majorityBearish or ma5DownOverall
+
+// ── 2. 큰 양봉 확인 (오늘 캔들 제외하고 평균 계산) ──
+isBullishCandle = close > open
+bodySize   = close - open
+avgBody    = ta.sma(math.abs(close[1] - open[1]), bodyLen)
+isBigBody  = bodySize > avgBody * bodyMult
+
+volSpike = volume > ta.sma(volume[1], volLen) * volMult
+
+// ── 3. 돌파 확인 (종가 기준, 위꼬리 노이즈 제외) ──
+priorHighestClose = ta.highest(close[1], declineLen)
+coversDownMove = close > priorHighestClose
+aboveMA5 = close > ma5
+
+// ── 4. 과거 20일 하락추세 확인 (오늘 캔들 제외, 어제 기준) ──
+regSlope20 = ta.linreg(close[1], trendLen, 0) - ta.linreg(close[1], trendLen, 1)
+isDowntrend20 = close[1] < close[1 + trendLen] and regSlope20 < 0
+
+// ── 5. 신호 전 횡보 베이스 확인 (급락 도중 반등 배제) ──
+baseHigh = ta.highest(high[1], baseLen)
+baseLow  = ta.lowest(low[1], baseLen)
+baseRangePct = (baseHigh - baseLow) / baseLow * 100
+hasBase = baseRangePct <= baseRangeMax
+
+// ── 6. 종가가 캔들 상단 근처인지 확인 (위꼬리 거부 배제) ──
+closePosition = (close - low) / (high - low)
+isStrongClose = closePosition >= closePosMin
+
+// ── 7. 최근 하락 속도가 과도하게 가파르지 않은지 확인 (떨어지는 칼날 배제) ──
+declineSpeed = (close[1] - close[1 + trendLen]) / close[1 + trendLen] * 100
+isNotTooSteep = declineSpeed > steepMaxPct
+
+// ── 최종 신호 ──
+signalCond = isDeclineZone and isBullishCandle and isBigBody and volSpike 
+     and coversDownMove and aboveMA5 and isDowntrend20 
+     and hasBase and isStrongClose and isNotTooSteep
+
+plotshape(signalCond, title="5일하락 돌파", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.lime, 0), size=size.small)
+
+bgcolor(isDeclineZone ? color.new(color.maroon, 92) : na, title="하락구간 배경표시")

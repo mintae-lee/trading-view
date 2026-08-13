@@ -1,9 +1,7 @@
 // This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// 주가가 급락 후 가격 조정을 거치며 224일선 아래에서 횡보하는 '공구리(바닥 다지기)' 구간
-// 5일 이동평균선이 20일 이동평균선을 상향 돌파(Golden Cross)할 때를 신호로 포착합니다.
 
 //@version=6
-indicator("밥그릇3번-256법", overlay=true)
+indicator("1년밥그릇256기법", overlay=true)
 
 // ══════════════════════════════════════
 // 1. 이동평균선 설정
@@ -18,10 +16,10 @@ ma20  = ta.sma(close, ma20Len)
 ma60  = ta.sma(close, ma60Len)
 ma224 = ta.sma(close, ma224Len)
 
-plot(ma5,   title="MA5",   color=color.new(color.white, 0), linewidth=1)
-plot(ma20,  title="MA20",  color=color.new(color.blue, 0), linewidth=1)
-plot(ma60,  title="MA60",  color=color.new(color.orange, 0), linewidth=3)
-plot(ma224, title="MA224", color=color.new(color.red, 0), linewidth=1)
+plot(ma5,   title="MA5",   color=color.new(color.lime, 0), linewidth=1)
+plot(ma20,  title="MA20",  color=color.new(color.orange, 0), linewidth=2)
+plot(ma60,  title="MA60",  color=color.new(color.red, 0), linewidth=2)
+plot(ma224, title="MA224", color=color.new(color.purple, 0), linewidth=1)
 
 // ══════════════════════════════════════
 // 2. 하락 후 224일선 아래 횡보(공구리) 구간 감지
@@ -89,3 +87,24 @@ maOrderSignal = isMaOrder60_5_20 and isMa5Rising
 plotshape(maOrderSignal, title="MA정렬 60-5-20", style=shape.triangleup,
      location=location.belowbar, color=color.new(color.white, 0),
      size=size.tiny, text="256")
+
+// ══════════════════════════════════════
+// 6. 각 이평선 이름을 마지막 봉 오른쪽에 라벨로 표시
+// ══════════════════════════════════════
+if barstate.islast
+    label.new(bar_index + 1, ma5, "MA5",
+         color=color.new(color.lime, 0), textcolor=color.black,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma20, "MA20",
+         color=color.new(color.orange, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma60, "MA60",
+         color=color.new(color.red, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma224, "MA224",
+         color=color.new(color.purple, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+         
