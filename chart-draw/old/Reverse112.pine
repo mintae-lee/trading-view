@@ -21,7 +21,7 @@ isReverseAlign = ma112 < ma224 and ma224 < ma448
 
 // ── 5. MA 5, bright emerald, bold ──
 ma5 = ta.sma(close, 5)
-plot(ma5, title="MA5", color=#00FFAA, linewidth=3)
+plot(ma5, title="MA5", color=color.gray, linewidth=3)
 
 // ── 6. Ichimoku Kijun-sen, pink ──
 kijunLen = input.int(26, "Kijun-sen Length")
