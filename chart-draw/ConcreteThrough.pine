@@ -99,3 +99,17 @@ if concreteCond
          color=color.new(color.orange, 20), size=size.tiny)
 
 bgcolor(isBottomZone ? color.new(color.blue, 80) : na, title="Bottom Zone (Reverse Align + Below MA) Background")
+
+// ── Show each line's name as a label at the last bar ──
+if barstate.islast
+    label.new(bar_index + 1, ma1, "MA112",
+         color=color.new(#b91e6b, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma2, "MA224",
+         color=color.new(color.green, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma5, "MA5",
+         color=color.new(color.white, 0), textcolor=color.black,
+         style=label.style_label_left, size=size.small)

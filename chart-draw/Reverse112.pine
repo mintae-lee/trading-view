@@ -2,13 +2,13 @@
 // © busiruk
 
 //@version=6
-indicator("112지지매집", overlay=true)
+indicator("ReverseAlign112", overlay=true)
 
-// ══════════════════════════════════════
-// 1. 기술적 지표 설정
-// ══════════════════════════════════════
+// ── 1. Bollinger Band(20,2) upper line only, dark blue, solid ──
+[bbMid, bbUpper, bbLower] = ta.bb(close, 20, 2.0)
+plot(bbUpper, title="BB Upper(20,2)", color=color.new(#0044ff, 0), style=plot.style_line, linewidth=1)
 
-// ── 장기 이동평균선 (역배열 판단용) ──
+// ── 2~4. Moving averages ──
 ma112 = ta.sma(close, 112)
 ma224 = ta.sma(close, 224)
 ma448 = ta.sma(close, 448)
@@ -19,124 +19,54 @@ plot(ma448, title="MA448", color=color.red, linewidth=1)
 
 isReverseAlign = ma112 < ma224 and ma224 < ma448
 
-// ── 단기 추세선 ──
-ma20 = ta.sma(close, 20)
-ma60 = ta.sma(close, 60)
+// ── 5. MA 5, bright emerald, bold ──
+ma5 = ta.sma(close, 5)
+plot(ma5, title="MA5", color=color.gray, linewidth=3)
 
-plot(ma20, title="MA20", color=color.new(color.white, 0), linewidth=1)
+// ── 6. Ichimoku Kijun-sen, pink ──
+kijunLen = input.int(26, "Kijun-sen Length")
+kijunSen = (ta.highest(high, kijunLen) + ta.lowest(low, kijunLen)) / 2
+plot(kijunSen, title="Kijun-sen", color=color.new(#FF69B4, 0), linewidth=2)
+
+// ── 7. MA 60, orange ──
+ma60 = ta.sma(close, 60)
 plot(ma60, title="MA60", color=color.new(color.orange, 0), linewidth=2)
 
-// ── MA5 ──
-ma5 = ta.sma(close, 5)
-plot(ma5, title="MA5", color=#00FFAA, linewidth=3)
+// ── 8. Bullish candle touching both BB upper and MA112 → triangle (color by alignment) ──
+isBullish = close > open
+touchBoth = high >= bbUpper and high >= ma112
+signalCond = isBullish and touchBoth
 
-// ── 볼린저 밴드 (참고 표시용) ──
-[bbMid, bbUpper, bbLower] = ta.bb(close, 20, 2.0)
-plot(bbUpper, title="BB Upper(20,2)", color=color.new(#0044ff, 0), style=plot.style_line, linewidth=1)
+plotshape(signalCond, title="BB Upper + MA112 Touch", style=shape.triangledown,
+     location=location.abovebar,
+     color=isReverseAlign ? color.new(color.lime, 0) : color.new(color.green, 60),
+     size=size.tiny)
 
-// ── 켈트너채널 상단 (BB보다 좁은 범위, 매수신호 판단용) ──
-kcLen  = input.int(20, "켈트너채널 EMA 기간", group="켈트너채널")
-kcAtrLen = input.int(10, "켈트너채널 ATR 기간", group="켈트너채널")
-kcMult = input.float(2.0, "켈트너채널 배수", group="켈트너채널")
-
-kcBase  = ta.ema(close, kcLen)
-kcAtr   = ta.atr(kcAtrLen)
-kcUpper = kcBase + kcAtr * kcMult
-
-plot(kcUpper, title="KC Upper", color=color.new(color.aqua, 0), linewidth=1)
-
+// ── 9. MA112 / MA224 / MA448 reverse alignment check (MA112 < MA224 < MA448) ──
 bgcolor(isReverseAlign ? color.new(color.red, 85) : na, title="Reverse Alignment Background")
 
-// ══════════════════════════════════════
-// 2. 3단계 매수 신호 로직
-// ══════════════════════════════════════
+// ── 10. Ichimoku Cloud (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) ──
+tenkanLen  = input.int(9, "Tenkan-sen Length", group="Ichimoku Cloud")
+senkouBLen = input.int(52, "Senkou Span B Length", group="Ichimoku Cloud")
+displacement = input.int(26, "Cloud Displacement", group="Ichimoku Cloud")
 
-maxStage1Wait = input.int(10, "1단계(돌파) 후 KC터치 대기 최대봉수", group="매수 신호")
-maxStage2Wait = input.int(15, "2단계(KC터치) 후 112지지 대기 최대봉수", group="매수 신호")
-proximityPct  = input.float(3.0, "112선 근접 허용범위(%)", group="매수 신호")
+tenkanSen = (ta.highest(high, tenkanLen) + ta.lowest(low, tenkanLen)) / 2
 
-// ── 1단계: MA5가 MA20, MA60, MA112를 순서대로 돌파 ──
-// (현재 MA5가 셋 다 위에 있고, 그 상태가 막 만들어졌는지 확인)
-isFullyAbove = ma5 > ma20 and ma5 > ma60 and ma5 > ma112
-justCrossedMa112 = ta.crossover(ma5, ma112)   // 매 봉 항상 호출
-stage1Trigger = justCrossedMa112 and ma5 > ma20 and ma5 > ma60
+senkouSpanA = (tenkanSen + kijunSen) / 2
+senkouSpanB = (ta.highest(high, senkouBLen) + ta.lowest(low, senkouBLen)) / 2
 
-var int  stage       = 0   // 0=대기, 1=돌파 확인됨(KC터치 대기), 2=KC터치됨(112지지 대기)
-var int  stageBar    = na
-var float supportLevel = na
+spanA = plot(senkouSpanA, title="Senkou Span A", color=color.new(color.green, 70), offset=displacement - 1)
+spanB = plot(senkouSpanB, title="Senkou Span B", color=color.new(color.red, 70), offset=displacement - 1)
 
-if stage1Trigger and stage == 0
-    stage    := 1
-    stageBar := bar_index
+fill(spanA, spanB,
+     color = senkouSpanA > senkouSpanB ? color.new(color.green, 85) : color.new(color.red, 85),
+     title = "Cloud")
 
-// 1단계 타임아웃
-if stage == 1 and (bar_index - stageBar > maxStage1Wait)
-    stage := 0
 
-// ── 2단계: 켈트너채널 상단 터치 ──
-touchKC = high >= kcUpper
-
-if stage == 1 and touchKC
-    stage    := 2
-    stageBar := bar_index
-
-// 2단계 타임아웃
-if stage == 2 and (bar_index - stageBar > maxStage2Wait)
-    stage := 0
-
-// ── 3단계: MA112로 눌림목 지지 확인 → 매수 신호 ──
-nearMa112 = math.abs(low - ma112) / ma112 * 100 <= proximityPct
-supportBounce = nearMa112 and close > open   // 112선 근처에서 반등 양봉
-
-buySignal = stage == 2 and supportBounce
-
-if buySignal
-    stage := 0   // 신호 발생 후 상태 초기화 (다음 사이클 준비)
-
-plotshape(buySignal, title="112지지 매수", style=shape.triangledown,
-     location=location.abovebar, color=color.new(color.lime, 0),
-     size=size.small, text="BUY")
-
-// 단계 진행 상황 참고 표시 (작은 마커)
-plotshape(stage1Trigger, title="1단계:돌파", style=shape.labeldown,
-     location=location.top, color=color.new(color.yellow, 0),
-     textcolor=color.black, text="돌파", size=size.tiny)
-
-plotshape(stage == 1 and touchKC, title="2단계:KC터치", style=shape.labelup,
-     location=location.top, color=color.new(color.aqua, 0),
-     textcolor=color.black, text="KC터치", size=size.tiny)
-
-// ══════════════════════════════════════
-// 3. 손절선
-// ══════════════════════════════════════
-var float stop_loss  = na
-var bool  inPosition  = false
-
-if buySignal and not inPosition
-    stop_loss  := ma112
-    inPosition := true
-
-stopHit = inPosition and close < ma112
-
-if stopHit
-    label.new(bar_index, low, "손절\n(112선 이탈)", color=color.new(color.red, 0),
-         textcolor=color.white, style=label.style_label_up, size=size.small)
-    stop_loss  := na
-    inPosition := false
-
-plot(inPosition ? stop_loss : na, title="손절선(112선)", color=color.new(color.red, 0),
-     style=plot.style_circles, linewidth=1)
-
-// ══════════════════════════════════════
-// 각 선 이름을 마지막 봉 오른쪽에 라벨로 표시
-// ══════════════════════════════════════
+// ── Show each line's name as a label at the last bar ──
 if barstate.islast
     label.new(bar_index + 1, bbUpper, "BB Upper",
          color=color.new(#0000CD, 0), textcolor=color.white,
-         style=label.style_label_left, size=size.small)
-
-    label.new(bar_index + 1, kcUpper, "KC Upper",
-         color=color.new(color.aqua, 0), textcolor=color.black,
          style=label.style_label_left, size=size.small)
 
     label.new(bar_index + 1, ma112, "MA112",
@@ -155,15 +85,15 @@ if barstate.islast
          color=color.new(#00FFAA, 0), textcolor=color.black,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, ma20, "MA20",
-         color=color.new(color.white, 0), textcolor=color.black,
-         style=label.style_label_left, size=size.small)
-
     label.new(bar_index + 1, ma60, "MA60",
          color=color.new(color.orange, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
+    label.new(bar_index + 1, kijunSen, "Kijun-sen",
+         color=color.new(#FF69B4, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
     label.new(bar_index + 1, (ma112 + ma448) / 2,
-         isReverseAlign ? "GO BUY" : "STOP BUY",
-         color=color.new(isReverseAlign ? color.blue : color.black, 0),
+         isReverseAlign ? "GO Buy" : "No Buy",
+         color=color.new(isReverseAlign ? color.red : color.gray, 0),
          textcolor=color.white, style=label.style_label_left, size=size.small)
