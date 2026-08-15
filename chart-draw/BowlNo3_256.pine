@@ -16,7 +16,7 @@ ma20  = ta.sma(close, ma20Len)
 ma60  = ta.sma(close, ma60Len)
 ma224 = ta.sma(close, ma224Len)
 
-plot(ma5,   title="MA5",   color=color.new(color.lime, 0), linewidth=1)
+plot(ma5,   title="MA5",   color=color.new(color.lime, 0), linewidth=2)
 plot(ma20,  title="MA20",  color=color.new(color.orange, 0), linewidth=2)
 plot(ma60,  title="MA60",  color=color.new(color.red, 0), linewidth=2)
 plot(ma224, title="MA224", color=color.new(color.purple, 0), linewidth=1)
