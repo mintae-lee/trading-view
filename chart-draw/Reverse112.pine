@@ -2,7 +2,7 @@
 // © busiruk
 
 //@version=6
-indicator("ReverseAlign112", overlay=true)
+indicator("역매공파BB_112", overlay=true)
 
 // ── 1. Bollinger Band(20,2) upper line only, dark blue, solid ──
 [bbMid, bbUpper, bbLower] = ta.bb(close, 20, 2.0)

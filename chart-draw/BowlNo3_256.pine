@@ -72,9 +72,9 @@ buySignal256 = breakout224 and waitingBreakout
 if buySignal256
     waitingBreakout := false   // 신호 발생 후 대기 상태 해제 (다음 사이클 준비)
 
-plotshape(buySignal256, title="256 매수", style=shape.triangleup,
-     location=location.belowbar, color=color.new(color.lime, 0),
-     size=size.tiny, text="256")
+plotshape(buySignal256, title="근접", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.lime, 0),
+     size=size.small, text="근접")
 
 // ══════════════════════════════════════
 // 5. 이동평균선 정렬 조건 (60일선 > 5일선 > 20일선 순서, 5일선 상승 중)
@@ -86,7 +86,7 @@ maOrderSignal = isMaOrder60_5_20 and isMa5Rising
 
 plotshape(maOrderSignal, title="MA정렬 60-5-20", style=shape.triangleup,
      location=location.belowbar, color=color.new(color.white, 0),
-     size=size.tiny, text="256")
+     size=size.tiny, text="정렬")
 
 // ══════════════════════════════════════
 // 6. 각 이평선 이름을 마지막 봉 오른쪽에 라벨로 표시

@@ -2,7 +2,7 @@
 // © busiruk
 
 //@version=6
-indicator("ReverseAlign112", overlay=true)
+indicator("역매공파26_112", overlay=true)
 
 // ── 1. Bollinger Band(20,2) upper line, 26-bar displaced (like Ichimoku cloud) ──
 bbDLen         = input.int(20, "BB Length", group="Displaced BB")
