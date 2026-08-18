@@ -1,0 +1,106 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © busiruk
+
+//@version=6
+indicator("ReverseAlign112", overlay=true)
+
+// ── 1. Bollinger Band(20,2) upper line, 26-bar displaced (like Ichimoku cloud) ──
+bbDLen         = input.int(20, "BB Length", group="Displaced BB")
+bbDMult        = input.float(2.0, "BB Mult", group="Displaced BB")
+bbDisplacement = input.int(26, "BB Displacement", group="Displaced BB")
+
+[bbMidD, bbUpperD, bbLowerD] = ta.bb(close, bbDLen, bbDMult)
+
+plot(bbUpperD, title="BB Upper (26-Displaced)", offset=bbDisplacement - 1,
+     color=color.new(#0044ff, 0), style=plot.style_line, linewidth=1)
+
+// ── 2~4. Moving averages ──
+ma112 = ta.sma(close, 112)
+ma224 = ta.sma(close, 224)
+ma448 = ta.sma(close, 448)
+
+plot(ma112, title="MA112", color=color.yellow, linewidth=1)
+plot(ma224, title="MA224", color=color.green, linewidth=1)
+plot(ma448, title="MA448", color=color.red, linewidth=1)
+
+isReverseAlign = ma112 < ma224 and ma224 < ma448
+
+// ── 5. MA 5, gray, bold ──
+ma5 = ta.sma(close, 5)
+plot(ma5, title="MA5", color=color.gray, linewidth=3)
+
+// ── 6. Ichimoku Kijun-sen, pink ──
+kijunLen = input.int(26, "Kijun-sen Length")
+kijunSen = (ta.highest(high, kijunLen) + ta.lowest(low, kijunLen)) / 2
+plot(kijunSen, title="Kijun-sen", color=color.new(#FF69B4, 0), linewidth=2)
+
+// ── 7. MA 60, orange ──
+ma60 = ta.sma(close, 60)
+plot(ma60, title="MA60", color=color.new(color.orange, 0), linewidth=2)
+
+// ── 8. Bullish candle touching both displaced BB upper and MA112 → triangle ──
+isBullish = close > open
+touchDisplacedBB = high >= bbUpperD[bbDisplacement - 1]   // value now shown at current bar's position
+touchBoth = touchDisplacedBB and high >= ma112
+signalCond = isBullish and touchBoth
+
+plotshape(signalCond, title="Displaced BB Upper + MA112 Touch", style=shape.triangledown,
+     location=location.abovebar,
+     color=isReverseAlign ? color.new(color.lime, 0) : color.new(color.green, 60),
+     size=size.tiny)
+
+// ── 9. MA112 / MA224 / MA448 reverse alignment check (MA112 < MA224 < MA448) ──
+bgcolor(isReverseAlign ? color.new(color.red, 85) : na, title="Reverse Alignment Background")
+
+// ── 10. Ichimoku Cloud (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) ──
+tenkanLen  = input.int(9, "Tenkan-sen Length", group="Ichimoku Cloud")
+senkouBLen = input.int(52, "Senkou Span B Length", group="Ichimoku Cloud")
+displacement = input.int(26, "Cloud Displacement", group="Ichimoku Cloud")
+
+tenkanSen = (ta.highest(high, tenkanLen) + ta.lowest(low, tenkanLen)) / 2
+
+senkouSpanA = (tenkanSen + kijunSen) / 2
+senkouSpanB = (ta.highest(high, senkouBLen) + ta.lowest(low, senkouBLen)) / 2
+
+spanA = plot(senkouSpanA, title="Senkou Span A", color=color.new(color.green, 70), offset=displacement - 1)
+spanB = plot(senkouSpanB, title="Senkou Span B", color=color.new(color.red, 70), offset=displacement - 1)
+
+fill(spanA, spanB,
+     color = senkouSpanA > senkouSpanB ? color.new(color.green, 85) : color.new(color.red, 85),
+     title = "Cloud")
+
+
+// ── Show each line's name as a label at the last bar ──
+if barstate.islast
+    label.new(bar_index + 1, bbUpperD, "BB Upper (26-Displaced)",
+         color=color.new(#0000CD, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma112, "MA112",
+         color=color.new(color.yellow, 0), textcolor=color.black,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma224, "MA224",
+         color=color.new(color.green, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma448, "MA448",
+         color=color.new(color.red, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma5, "MA5",
+         color=color.new(color.gray, 0), textcolor=color.black,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, ma60, "MA60",
+         color=color.new(color.orange, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, kijunSen, "Kijun-sen",
+         color=color.new(#FF69B4, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, (ma112 + ma448) / 2,
+         isReverseAlign ? "GO Buy" : "No Buy",
+         color=color.new(isReverseAlign ? color.red : color.gray, 0),
+         textcolor=color.white, style=label.style_label_left, size=size.small)
