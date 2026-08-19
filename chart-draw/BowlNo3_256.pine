@@ -64,17 +64,19 @@ if waitingBreakout and not na(goldenCrossBar) and (bar_index - goldenCrossBar > 
     waitingBreakout := false
 
 // ══════════════════════════════════════
-// 4. 224일선 돌파 = 최종 매수 타점
+// 4. 224일선 근접 = 매수 관심 구간
 // ══════════════════════════════════════
-breakout224 = ta.crossover(close, ma224)   // 매 봉 항상 호출
-buySignal256 = breakout224 and waitingBreakout
+proximityPct = input.float(2.0, "224일선 근접 허용범위(%)", group="매수 신호")
+
+nearMa224 = math.abs(close - ma224) / ma224 * 100 <= proximityPct
+buySignal256 = nearMa224 and waitingBreakout
 
 if buySignal256
     waitingBreakout := false   // 신호 발생 후 대기 상태 해제 (다음 사이클 준비)
 
 plotshape(buySignal256, title="근접", style=shape.triangledown,
      location=location.abovebar, color=color.new(color.lime, 0),
-     size=size.small, text="근접")
+     textcolor=color.white, size=size.small, text="1년선근접")
 
 // ══════════════════════════════════════
 // 5. 이동평균선 정렬 조건 (60일선 > 5일선 > 20일선 순서, 5일선 상승 중)
