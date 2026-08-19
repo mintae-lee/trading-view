@@ -32,7 +32,7 @@ plot(ma5, title="MA5", color=color.gray, linewidth=3)
 // ── 6. Ichimoku Kijun-sen, pink ──
 kijunLen = input.int(26, "Kijun-sen Length")
 kijunSen = (ta.highest(high, kijunLen) + ta.lowest(low, kijunLen)) / 2
-plot(kijunSen, title="Kijun-sen", color=color.new(#FF69B4, 0), linewidth=2)
+// plot(kijunSen, title="Kijun-sen", color=color.new(#FF69B4, 0), linewidth=2)
 
 // ── 7. MA 60, orange ──
 ma60 = ta.sma(close, 60)
@@ -96,9 +96,9 @@ if barstate.islast
          color=color.new(color.orange, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, kijunSen, "Kijun-sen",
-         color=color.new(#FF69B4, 0), textcolor=color.white,
-         style=label.style_label_left, size=size.small)
+//     label.new(bar_index + 1, kijunSen, "Kijun-sen",
+//          color=color.new(#FF69B4, 0), textcolor=color.white,
+//          style=label.style_label_left, size=size.small)
 
     label.new(bar_index + 1, (ma112 + ma448) / 2,
          isReverseAlign ? "GO Buy" : "No Buy",
