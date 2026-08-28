@@ -32,6 +32,16 @@ ma5  = ta.sma(close, 5)
 plot(ma5,  title="MA5",  color=color.rgb(255, 255, 255), linewidth=2)
 // plot(ma448, title="MA448", color=color.new(#ff9900, 46), linewidth=1)
 
+// ── MA5가 MA224에 근접 시 역삼각형 표시 (최초 근접 시점만) ──
+ma5NearMa224Pct = input.float(2.0, "MA5-MA224 근접 허용범위(%)", group="근접 조건")
+
+ma5NearMa224 = math.abs(ma5 - ma2) / ma2 * 100 <= ma5NearMa224Pct
+ma5NearMa224JustNow = ma5NearMa224 and not ma5NearMa224[1]
+
+plotshape(ma5NearMa224JustNow, title="MA5-MA224 근접", style=shape.triangledown,
+     location=location.top, color=color.new(color.yellow, 0), size=size.small)
+
+
 // ── 2. Hill (previous swing high) tracking ──
 pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
 
