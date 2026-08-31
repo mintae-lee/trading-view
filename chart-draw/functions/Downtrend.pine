@@ -1,20 +1,17 @@
+// ⚠ 이 파일은 단독 실행용 지표가 아니라 다른 스크립트에 붙여쓰는 스니펫이다.
+//   (indicator() 선언이 없어 그대로는 컴파일되지 않는다)
+
 // ── 하락추세 판단 함수 (선형회귀 기울기 + 가격비교) ──
 f_isDowntrend(src, length) =>
     regSlope = ta.linreg(src, length, 0) - ta.linreg(src, length, 1)
     src < src[length] and regSlope < 0
 
-// 사용 예시
+// 사용 예시 1: 추세 구간 배경 표시
 isDowntrend20 = f_isDowntrend(close, 20)   // 20일 하락추세 판단
 isDowntrend60 = f_isDowntrend(close, 60)   // 60일 하락추세 판단
 
 bgcolor(isDowntrend20 ? color.new(color.purple, 90) : na, title="20-day Downtrend")
 
-// 기존 역배열 신호 스크립트에 통합하는 예시
-f_isDowntrend(src, length) =>
-    regSlope = ta.linreg(src, length, 0) - ta.linreg(src, length, 1)
-    src < src[length] and regSlope < 0
-
-// 기존 코드 중간에서 바로 사용
-isDowntrend20 = f_isDowntrend(close, 20)
-
-signalCond = isBullish and touchBoth and isReverseAlign and isDowntrend20  // 20일 하락추세였던 반등만 필터링
+// 사용 예시 2: 기존 역배열 신호 스크립트에 필터로 통합
+//   isBullish / touchBoth / isReverseAlign 은 통합 대상 스크립트에서 이미 정의된 변수
+// signalCond = isBullish and touchBoth and isReverseAlign and isDowntrend20

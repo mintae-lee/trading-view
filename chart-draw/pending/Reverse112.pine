@@ -17,7 +17,7 @@ plot(ma112, title="MA112", color=color.yellow, linewidth=1)
 plot(ma224, title="MA224", color=color.green, linewidth=1)
 plot(ma448, title="MA448", color=color.red, linewidth=1)
 
-isReverseAlign = ma112 < ma224 and ma224 < ma448
+isReverseAlign = ma112 < ma224 and ma224 < ma448   // 112 < 224 < 448 = 역배열(하락정렬)
 
 // ── 단기 추세선 ──
 ma20 = ta.sma(close, 20)
@@ -30,53 +30,108 @@ plot(ma60, title="MA60", color=color.new(color.orange, 0), linewidth=2)
 ma5 = ta.sma(close, 5)
 plot(ma5, title="MA5", color=#00FFAA, linewidth=3)
 
-// ── 볼린저 밴드 (참고 표시용) ──
-[bbMid, bbUpper, bbLower] = ta.bb(close, 20, 2.0)
-plot(bbUpper, title="BB Upper(20,2)", color=color.new(#0044ff, 0), style=plot.style_line, linewidth=1)
+// ── 2단계 판정용 상단 밴드 ──
+// 사양서 미해결 #3: 켈트너채널을 26봉 선행이동 BB(스크립트 1번과 동일 기준)로
+// 바꿀지 미확정. 두 기준을 토글로 두어 같은 차트에서 비교할 수 있게 한다.
+useDisplacedBB = input.bool(false, "상단 기준을 26봉 선행이동 BB로 사용(끄면 켈트너채널)",
+     group="상단 밴드")
 
-// ── 켈트너채널 상단 (BB보다 좁은 범위, 매수신호 판단용) ──
-kcLen  = input.int(20, "켈트너채널 EMA 기간", group="켈트너채널")
-kcAtrLen = input.int(10, "켈트너채널 ATR 기간", group="켈트너채널")
-kcMult = input.float(2.0, "켈트너채널 배수", group="켈트너채널")
+kcLen    = input.int(20, "켈트너채널 EMA 기간", group="상단 밴드")
+kcAtrLen = input.int(10, "켈트너채널 ATR 기간", group="상단 밴드")
+kcMult   = input.float(2.0, "켈트너채널 배수", group="상단 밴드")
 
 kcBase  = ta.ema(close, kcLen)
 kcAtr   = ta.atr(kcAtrLen)
 kcUpper = kcBase + kcAtr * kcMult
 
-plot(kcUpper, title="KC Upper", color=color.new(color.aqua, 0), linewidth=1)
+bbDLen         = input.int(20, "BB 기간", group="상단 밴드")
+bbDMult        = input.float(2.0, "BB 배수", group="상단 밴드")
+bbDisplacement = input.int(26, "BB 선행이동 봉수", group="상단 밴드")
+
+[bbMidD, bbUpperD, bbLowerD] = ta.bb(close, bbDLen, bbDMult)
+
+// offset=N 으로 그린 선은 현재 봉 위치에 series[N]을 보여준다 → 비교도 같은 값으로
+bbUpperShown = bbUpperD[bbDisplacement - 1]
+
+plot(useDisplacedBB ? na : kcUpper, title="KC Upper",
+     color=color.new(color.aqua, 0), linewidth=1)
+plot(useDisplacedBB ? bbUpperD : na, title="BB Upper (26-Displaced)",
+     offset=bbDisplacement - 1, color=color.new(#0044ff, 0), linewidth=1)
+
+upperBand = useDisplacedBB ? bbUpperShown : kcUpper
 
 bgcolor(isReverseAlign ? color.new(color.red, 85) : na, title="Reverse Alignment Background")
 
 // ══════════════════════════════════════
-// 2. 3단계 매수 신호 로직
+// 2. 매집봉(피벗 고점) 감지 → "들어올렸다가 다시 빼는" 형태
 // ══════════════════════════════════════
+pivotLeft  = input.int(5, "매집봉 감지 좌측 봉수", group="매집봉 조건")
+pivotRight = input.int(5, "매집봉 감지 우측 봉수(확정 지연)", group="매집봉 조건")
+volLen     = input.int(20, "거래량 평균 기간", group="매집봉 조건")
+volMult    = input.float(2.0, "매집봉 거래량 배수", group="매집봉 조건")
 
-maxStage1Wait = input.int(10, "1단계(돌파) 후 KC터치 대기 최대봉수", group="매수 신호")
-maxStage2Wait = input.int(15, "2단계(KC터치) 후 112지지 대기 최대봉수", group="매수 신호")
+pivotHighVal   = ta.pivothigh(high, pivotLeft, pivotRight)
+pivotVolAtPeak = volume[pivotRight]
+avgVolAtPeak   = ta.sma(volume, volLen)[pivotRight]
+
+// 사양서 미해결 #1: 상승추세 구간에 매집봉이 남발되는 문제.
+// 피벗이 찍힌 그 시점이 실제로 역배열이었는지까지 확인한다.
+accumulationBar = not na(pivotHighVal)
+     and pivotVolAtPeak > avgVolAtPeak * volMult
+     and isReverseAlign[pivotRight]
+
+var float hillLevel = na
+var int   hillBar   = na
+
+if accumulationBar
+    hillLevel := pivotHighVal
+    hillBar   := bar_index - pivotRight
+
+// ══════════════════════════════════════
+// 3. 공구리(20/60일선 안착) 확인
+// ══════════════════════════════════════
+isAboveShortTerm = close > ma20 and close > ma60   // 20/60일선 안착 (명시적 조건)
+
+// ══════════════════════════════════════
+// 4. 3단계 매수 신호 로직
+// ══════════════════════════════════════
+maxAccumWait  = input.int(10, "매집봉 후 20/60일선 안착 대기 최대봉수", group="매수 신호",
+     tooltip="0이면 매집봉과 안착이 같은 봉에서 동시에 성립해야 한다.")
+maxStage1Wait = input.int(15, "1단계(매집+안착) 후 상단터치 대기 최대봉수", group="매수 신호")
+maxStage2Wait = input.int(15, "2단계(상단터치) 후 112지지 대기 최대봉수", group="매수 신호")
 proximityPct  = input.float(3.0, "112선 근접 허용범위(%)", group="매수 신호")
 
-// ── 1단계: MA5가 MA20, MA60, MA112를 순서대로 돌파 ──
-// (현재 MA5가 셋 다 위에 있고, 그 상태가 막 만들어졌는지 확인)
-isFullyAbove = ma5 > ma20 and ma5 > ma60 and ma5 > ma112
-justCrossedMa112 = ta.crossover(ma5, ma112)   // 매 봉 항상 호출
-stage1Trigger = justCrossedMa112 and ma5 > ma20 and ma5 > ma60
+// ── 사양서 미해결 #2: 매집봉과 안착의 시간 관계.
+//    매집봉 시점을 기억해 두고, maxAccumWait 봉 이내에 안착하면 1단계 성립으로 본다.
+var int accumBar = na
 
-var int  stage       = 0   // 0=대기, 1=돌파 확인됨(KC터치 대기), 2=KC터치됨(112지지 대기)
-var int  stageBar    = na
-var float supportLevel = na
+if accumulationBar
+    accumBar := bar_index
 
-if stage1Trigger and stage == 0
-    stage    := 1
-    stageBar := bar_index
+accumFresh = not na(accumBar) and (bar_index - accumBar) <= maxAccumWait
+
+// ── 1단계: 역배열 상태에서 매집봉 발생 + 20/60일선 안착 ──
+var int stage    = 0   // 0=대기, 1=매집+안착 확인됨, 2=상단터치됨
+var int stageBar = na
+
+stage1Ready = isReverseAlign and accumFresh and isAboveShortTerm
+
+stage1Fired = false
+if stage1Ready and stage == 0
+    stage       := 1
+    stageBar    := bar_index
+    stage1Fired := true
+    accumBar    := na   // 이 매집봉은 소비했으므로 재사용 금지
 
 // 1단계 타임아웃
 if stage == 1 and (bar_index - stageBar > maxStage1Wait)
     stage := 0
 
-// ── 2단계: 켈트너채널 상단 터치 ──
-touchKC = high >= kcUpper
+// ── 2단계: 상단 밴드 터치 ──
+touchUpper  = high >= upperBand
+stage2Fired = stage == 1 and touchUpper
 
-if stage == 1 and touchKC
+if stage2Fired
     stage    := 2
     stageBar := bar_index
 
@@ -85,38 +140,46 @@ if stage == 2 and (bar_index - stageBar > maxStage2Wait)
     stage := 0
 
 // ── 3단계: MA112로 눌림목 지지 확인 → 매수 신호 ──
-nearMa112 = math.abs(low - ma112) / ma112 * 100 <= proximityPct
+nearMa112     = math.abs(low - ma112) / ma112 * 100 <= proximityPct
 supportBounce = nearMa112 and close > open   // 112선 근처에서 반등 양봉
 
-buySignal = stage == 2 and supportBounce
+// 상단터치 봉과 같은 봉에서 눌림목까지 성립할 수는 없으므로 다음 봉부터 인정
+buySignal = stage == 2 and bar_index > stageBar and supportBounce
 
 if buySignal
     stage := 0   // 신호 발생 후 상태 초기화 (다음 사이클 준비)
 
-plotshape(buySignal, title="112지지 매수", style=shape.triangledown,
-     location=location.abovebar, color=color.new(color.lime, 0),
+plotshape(buySignal, title="112지지 매수", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.lime, 0),
      size=size.small, text="BUY")
 
-// 단계 진행 상황 참고 표시 (작은 마커)
-plotshape(stage1Trigger, title="1단계:돌파", style=shape.labeldown,
+// ── 단계 진행 상황 참고 표시 ──
+// 사양서 미해결 #1: "매집" 라벨은 accumulationBar 발생 시점이 아니라
+// 1단계를 실제로 통과한 시점에만 띄운다.
+plotshape(stage1Fired, title="1단계:매집+안착", style=shape.labelup,
      location=location.top, color=color.new(color.yellow, 0),
-     textcolor=color.black, text="돌파", size=size.tiny)
+     textcolor=color.black, text="매집", size=size.tiny)
 
-plotshape(stage == 1 and touchKC, title="2단계:KC터치", style=shape.labelup,
+plotshape(stage2Fired, title="2단계:상단터치", style=shape.labelup,
      location=location.top, color=color.new(color.aqua, 0),
-     textcolor=color.black, text="KC터치", size=size.tiny)
+     textcolor=color.black, text="터치", size=size.tiny)
+
+// 1단계를 통과한 매집봉의 고점에 원형 마커
+if stage1Fired and not na(hillBar)
+    label.new(hillBar, hillLevel, "", style=label.style_circle,
+         color=color.new(color.orange, 20), size=size.tiny)
 
 // ══════════════════════════════════════
-// 3. 손절선
+// 5. 손절선
 // ══════════════════════════════════════
 var float stop_loss  = na
-var bool  inPosition  = false
+var bool  inPosition = false
 
 if buySignal and not inPosition
     stop_loss  := ma112
     inPosition := true
 
-stopHit = inPosition and close < ma112
+stopHit = inPosition and not buySignal and close < ma112
 
 if stopHit
     label.new(bar_index, low, "손절\n(112선 이탈)", color=color.new(color.red, 0),
@@ -131,13 +194,14 @@ plot(inPosition ? stop_loss : na, title="손절선(112선)", color=color.new(col
 // 각 선 이름을 마지막 봉 오른쪽에 라벨로 표시
 // ══════════════════════════════════════
 if barstate.islast
-    label.new(bar_index + 1, bbUpper, "BB Upper",
-         color=color.new(#0000CD, 0), textcolor=color.white,
-         style=label.style_label_left, size=size.small)
-
-    label.new(bar_index + 1, kcUpper, "KC Upper",
-         color=color.new(color.aqua, 0), textcolor=color.black,
-         style=label.style_label_left, size=size.small)
+    if useDisplacedBB
+        label.new(bar_index + bbDisplacement - 1, bbUpperD, "BB Upper (26-Displaced)",
+             color=color.new(#0000CD, 0), textcolor=color.white,
+             style=label.style_label_left, size=size.small)
+    else
+        label.new(bar_index + 1, kcUpper, "KC Upper",
+             color=color.new(color.aqua, 0), textcolor=color.black,
+             style=label.style_label_left, size=size.small)
 
     label.new(bar_index + 1, ma112, "MA112",
          color=color.new(color.yellow, 0), textcolor=color.black,

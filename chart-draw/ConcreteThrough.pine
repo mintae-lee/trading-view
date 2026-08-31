@@ -45,19 +45,13 @@ plotshape(ma5NearMa224JustNow, title="MA5-MA224 근접", style=shape.triangledow
 // ── 2. Hill (previous swing high) tracking ──
 pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
 
-var float hillLevel = na
-var int   hillBar   = na
+var float hillLevel       = na
+var int   hillBar         = na
+var bool  hillBreakMarked = false   // 산 1개당 돌파 마커 1회만 표시
 
 if not na(pivotHigh)
-    hillLevel := pivotHigh
-    hillBar   := bar_index - pivotRight
-
-// ── Hill breakout candle marker (first bullish candle exceeding hill's high) ──
-var bool hillBreakMarked = false
-
-if not na(pivotHigh)
-    hillLevel := pivotHigh
-    hillBar   := bar_index - pivotRight
+    hillLevel       := pivotHigh
+    hillBar         := bar_index - pivotRight
     hillBreakMarked := false   // reset marker state for the new hill
 
 isBullishCandle = close > open
@@ -92,13 +86,14 @@ var bool  supportBroken = false
 if concreteCond
     if not na(supportLine)
         line.delete(supportLine)
-    supportLine := line.new(bar_index, open, bar_index + 200, open,
+    supportLine := line.new(bar_index, open, bar_index + 1, open,
          color=color.new(#8B7355, 0), style=line.style_dashed, width=2, extend=extend.right)
     supportPrice := open
     supportBroken := false
 
 // ── 5. Support break warning (stop-loss alert) ──
-if not na(supportPrice) and not supportBroken and close < supportPrice
+// 돌파봉이 음봉이면 그 봉에서 바로 Loss가 뜨므로, 발생 봉 자체는 제외한다
+if not na(supportPrice) and not supportBroken and not concreteCond and close < supportPrice
     supportBroken := true
     label.new(bar_index, low, "Loss", color=color.new(color.red, 0),
          textcolor=color.white, style=label.style_label_up, size=size.small)

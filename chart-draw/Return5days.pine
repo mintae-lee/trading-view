@@ -59,7 +59,8 @@ baseRangePct = (baseHigh - baseLow) / baseLow * 100
 hasBase = baseRangePct <= baseRangeMax
 
 // ── 6. 종가가 캔들 상단 근처인지 확인 (위꼬리 거부 배제) ──
-closePosition = (close - low) / (high - low)
+candleRange   = high - low
+closePosition = candleRange > 0 ? (close - low) / candleRange : 1.0   // 시가=고가=저가 봉(상한가 등)은 최강 종가로 취급
 isStrongClose = closePosition >= closePosMin
 
 // ── 7. 최근 하락 속도가 과도하게 가파르지 않은지 확인 (떨어지는 칼날 배제) ──

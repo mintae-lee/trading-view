@@ -34,20 +34,125 @@ kijunLen = input.int(26, "Kijun-sen Length")
 kijunSen = (ta.highest(high, kijunLen) + ta.lowest(low, kijunLen)) / 2
 // plot(kijunSen, title="Kijun-sen", color=color.new(#FF69B4, 0), linewidth=2)
 
-// ── 7. MA 60, orange ──
+// ── 7. MA 20 / MA 60 ──
+ma20 = ta.sma(close, 20)
+plot(ma20, title="MA20", color=color.new(color.white, 0), linewidth=1)
+
 ma60 = ta.sma(close, 60)
 plot(ma60, title="MA60", color=color.new(color.orange, 0), linewidth=2)
 
-// ── 8. Bullish candle touching both displaced BB upper and MA112 → triangle ──
-isBullish = close > open
-touchDisplacedBB = high >= bbUpperD[bbDisplacement - 1]   // value now shown at current bar's position
-touchBoth = touchDisplacedBB and high >= ma112
-signalCond = isBullish and touchBoth
+// ── 8. 파란 점선(26봉 선행이동 BB 상단) 돌파·근접 + 112일선 근처 → 삼각형 ──
+//    주의: bbUpperD[bbDisplacement-1] 은 25봉 전에 계산된 밴드값이다.
+//    화면상 현재 봉 위치에 그려지는 값이라 시각적으로는 맞지만, 상승 중에는
+//    그 값이 현재가보다 한참 아래라 "high >= 밴드"가 거의 항상 참이 된다.
+//    그래서 역배열·112선 근접·1회 제한이 없으면 신호가 봉마다 뜬다.
+bandWindow   = input.int(10, "밴드 돌파 인정 윈도우(봉)", group="신호 조건",
+     tooltip="'최근에 뚫었거나' — 이 봉수 이내에 돌파했으면 유효로 본다.")
+bandNearPct  = input.float(2.0, "밴드 근접 인정(%)", group="신호 조건",
+     tooltip="'뚫기 직전' — 밴드 아래 이 % 이내까지 붙으면 근접으로 인정.")
+ma112NearPct = input.float(5.0, "112일선 근접 허용범위(%)", group="신호 조건",
+     tooltip="기법상 '112일선 근처'가 조건이다.\n'112일선 위'(high >= ma112)로 두면 상승 중 모든 봉이 통과한다.")
 
-plotshape(signalCond, title="Displaced BB Upper + MA112 Touch", style=shape.triangledown,
-     location=location.abovebar,
-     color=isReverseAlign ? color.new(color.lime, 0) : color.new(color.green, 60),
-     size=size.tiny)
+isBullish = close > open
+
+// 파란 점선을 최근에 뚫었거나 뚫기 직전인가
+touchedBand     = high >= bbUpperD[bbDisplacement - 1] * (1 - bandNearPct / 100)
+recentlyTouched = nz(ta.barssince(touchedBand), 9999) <= bandWindow
+
+// 112일선 "위"가 아니라 "근처"
+nearMa112 = math.abs(close - ma112) / ma112 * 100 <= ma112NearPct
+
+bandAndMa112 = isReverseAlign and recentlyTouched and nearMa112 and isBullish
+
+// ── 8-1. 1단계: 매집봉 + 지지라인 형성 ──
+//    역배열 상태에서 바닥을 다지며 "들어올렸다가 다시 빼는" 매집봉이 뜨고,
+//    그 밑에 지지 라인이 형성된 상태를 확인한다.
+pivotLeft    = input.int(5, "매집봉 감지 좌측 봉수", group="1단계: 매집봉")
+pivotRight   = input.int(5, "매집봉 감지 우측 봉수(확정 지연)", group="1단계: 매집봉")
+volLen       = input.int(20, "거래량 평균 기간", group="1단계: 매집봉")
+volMult      = input.float(1.5, "매집봉 거래량 배수", group="1단계: 매집봉")
+supportLen   = input.int(40, "지지라인 산출 기간(봉)", group="1단계: 매집봉")
+maxAccumWait = input.int(60, "매집봉 후 2단계 대기 최대 봉수", group="1단계: 매집봉")
+
+pivotHighVal   = ta.pivothigh(high, pivotLeft, pivotRight)
+pivotVolAtPeak = volume[pivotRight]
+avgVolAtPeak   = ta.sma(volume, volLen)[pivotRight]
+
+// 피벗이 찍힌 그 시점이 실제로 역배열이었는지까지 확인 (상승추세 오탐 차단)
+accumulationBar = not na(pivotHighVal)
+     and pivotVolAtPeak > avgVolAtPeak * volMult
+     and isReverseAlign[pivotRight]
+
+var int   accumBar     = na   // 매집봉 확정 봉
+var float supportLevel = na   // 매집봉 밑에 형성된 지지라인
+
+if accumulationBar
+    accumBar     := bar_index
+    supportLevel := ta.lowest(low, supportLen)
+
+// 지지라인을 종가로 이탈하면 셋업 무효
+supportHeld = not na(supportLevel) and close >= supportLevel
+accumFresh  = not na(accumBar) and (bar_index - accumBar) <= maxAccumWait
+
+stage1Ready = accumFresh and supportHeld
+
+// ── 8-2. 2단계: 파란 점선 돌파·근접 + 112선 근처 ──
+var int stage    = 0   // 0=대기, 1=매집봉 확인, 2=밴드·112선 조건 충족(눌림 대기)
+var int stageBar = na
+
+stage2Fired = false
+
+if stage1Ready and stage == 0
+    stage    := 1
+    stageBar := bar_index
+    accumBar := na   // 이 매집봉은 소비 — 다음 사이클엔 새 매집봉이 필요하다.
+                     // 소비하지 않으면 BUY 후 같은 셋업에서 시퀀스가 재활용되어
+                     // 신호가 3배 넘게 늘어난다 (합성 검증: 셋당 4.48 → 1.43)
+
+if stage == 1 and not supportHeld
+    stage := 0   // 지지라인 이탈
+
+if stage == 1 and bandAndMa112
+    stage       := 2
+    stageBar    := bar_index
+    stage2Fired := true
+
+// ── 8-3. 3단계: 눌림목 공략 ──
+//    한 번 상승한 뒤 눌러줄 때, 또는 기준 이평선을 뚫을 때/뚫기 직전.
+pullbackMaSel   = input.string("MA20", "눌림 기준 이평선", options=["MA5", "MA20", "MA60"],
+     group="3단계: 눌림목")
+pullbackTolPct  = input.float(2.0, "눌림 인정 범위(기준선 대비 %)", group="3단계: 눌림목",
+     tooltip="저가가 기준선 ±이 % 안까지 눌렸다가 종가는 기준선 위에서 양봉 마감하면 눌림 지지로 본다.")
+maxPullbackWait = input.int(20, "2단계 후 눌림 대기 최대 봉수", group="3단계: 눌림목")
+
+pullbackMa = pullbackMaSel == "MA5" ? ma5 : pullbackMaSel == "MA60" ? ma60 : ma20
+
+pulledBack = low <= pullbackMa * (1 + pullbackTolPct / 100)
+holdsAbove = close > pullbackMa
+
+buySignal = stage == 2 and bar_index > stageBar and pulledBack and holdsAbove and isBullish
+
+if buySignal
+    stage := 0
+
+// 단계별 타임아웃
+if stage == 2 and (bar_index - stageBar > maxPullbackWait)
+    stage := 0
+
+plotshape(stage2Fired, title="2단계: 밴드 돌파·근접 + 112선 근처", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.lime, 0), size=size.tiny)
+
+plotshape(accumulationBar, title="1단계: 매집봉", style=shape.labeldown,
+     location=location.abovebar, offset=-pivotRight,
+     color=color.new(#8B7355, 0), textcolor=color.white, text="매집", size=size.tiny)
+
+plotshape(buySignal, title="3단계: 눌림목 매수", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.lime, 0),
+     textcolor=color.lime, size=size.small, text="BUY")
+
+// 지지라인 표시
+plot(stage > 0 ? supportLevel : na, title="지지라인", color=color.new(#8B7355, 0),
+     style=plot.style_linebr, linewidth=2)
 
 // ── 9. MA112 / MA224 / MA448 reverse alignment check (MA112 < MA224 < MA448) ──
 bgcolor(isReverseAlign ? color.new(color.red, 85) : na, title="Reverse Alignment Background")
@@ -72,7 +177,8 @@ fill(spanA, spanB,
 
 // ── Show each line's name as a label at the last bar ──
 if barstate.islast
-    label.new(bar_index + 1, bbUpperD, "BB Upper (26-Displaced)",
+    // 선행이동된 선의 오른쪽 끝(= bbUpperD 현재값이 그려지는 위치)에 라벨을 붙인다
+    label.new(bar_index + bbDisplacement - 1, bbUpperD, "BB Upper (26-Displaced)",
          color=color.new(#0000CD, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
