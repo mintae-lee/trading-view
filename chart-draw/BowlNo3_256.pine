@@ -207,7 +207,7 @@ bowlWatch = showWatch and bowlReady and not bowlFired
 if bowlWatch
     bowlFired := true
 
-plotshape(bowlWatch, title="2번 매집 진행(관찰)", style=shape.circle,
+plotshape(bowlWatch, title="2번 매집 진행(관찰)", style=shape.triangleup,
      location=location.belowbar, color=color.new(color.white, 0), size=size.tiny)
 
 // ══════════════════════════════════════

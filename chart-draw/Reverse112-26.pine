@@ -86,9 +86,12 @@ accumulationBar = not na(pivotHighVal)
 var int   accumBar     = na   // 매집봉 확정 봉
 var float supportLevel = na   // 매집봉 밑에 형성된 지지라인
 
+// ta.* 는 매 봉 호출돼야 하므로 if 블록 밖에서 계산한다
+supportCandidate = ta.lowest(low, supportLen)
+
 if accumulationBar
     accumBar     := bar_index
-    supportLevel := ta.lowest(low, supportLen)
+    supportLevel := supportCandidate
 
 // 지지라인을 종가로 이탈하면 셋업 무효
 supportHeld = not na(supportLevel) and close >= supportLevel
@@ -202,11 +205,47 @@ if barstate.islast
          color=color.new(color.orange, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-//     label.new(bar_index + 1, kijunSen, "Kijun-sen",
-//          color=color.new(#FF69B4, 0), textcolor=color.white,
-//          style=label.style_label_left, size=size.small)
+// ══════════════════════════════════════
+// 9. 상태 패널 (우상단 고정)
+//    마지막 봉에 붙는 라벨은 차트를 스크롤·확대하면 화면에서 사라진다.
+//    테이블은 위치가 고정되므로 시인성이 훨씬 좋고, 진행 단계까지 함께 보여준다.
+// ══════════════════════════════════════
+panelPos = input.string("top_right", "상태 패널 위치", group="상태 패널",
+     options=["top_right", "top_left", "bottom_right", "bottom_left", "middle_right"])
+panelSize = input.string("large", "상태 패널 글자 크기", group="상태 패널",
+     options=["small", "normal", "large", "huge"])
 
-    label.new(bar_index + 1, (ma112 + ma448) / 2,
-         isReverseAlign ? "GO Buy" : "No Buy",
-         color=color.new(isReverseAlign ? color.red : color.gray, 0),
-         textcolor=color.white, style=label.style_label_left, size=size.small)
+tblPos = panelPos == "top_left" ? position.top_left
+     : panelPos == "bottom_right" ? position.bottom_right
+     : panelPos == "bottom_left" ? position.bottom_left
+     : panelPos == "middle_right" ? position.middle_right
+     : position.top_right
+
+tblSize = panelSize == "small" ? size.small
+     : panelSize == "normal" ? size.normal
+     : panelSize == "huge" ? size.huge
+     : size.large
+
+var table statusPanel = table.new(tblPos, 1, 2, border_width=1)
+
+if barstate.islast
+    // 1행: 역배열 여부 = 셋업 자격
+    table.cell(statusPanel, 0, 0,
+         isReverseAlign ? "● GO BUY" : "● NO BUY",
+         bgcolor = isReverseAlign ? color.new(color.red, 0) : color.new(color.gray, 30),
+         text_color = color.white, text_size = tblSize)
+
+    // 2행: 3단계 시퀀스 진행 상황
+    stageTxt = buySignal          ? "▲ 3단계 눌림목 BUY"
+         : stage == 2             ? "② 밴드+112선 → 눌림 대기"
+         : stage == 1             ? "① 매집봉 확인 → 밴드 대기"
+         : "대기"
+    stageBg = buySignal ? color.new(color.lime, 0)
+         : stage == 2   ? color.new(color.orange, 10)
+         : stage == 1   ? color.new(#8B7355, 10)
+         : color.new(color.gray, 60)
+
+    table.cell(statusPanel, 0, 1, stageTxt,
+         bgcolor = stageBg,
+         text_color = buySignal ? color.black : color.white,
+         text_size = tblSize == size.huge ? size.large : tblSize)
