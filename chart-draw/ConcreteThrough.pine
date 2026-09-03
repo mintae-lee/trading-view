@@ -2,7 +2,7 @@
 // © busiruk
 
 //@version=6
-indicator("하락후지지 공구리돌파", overlay=true)
+indicator("하락후지지 돌파", overlay=true)
 
 // ── Inputs ──
 maLen1      = input.int(112, "Bottom Zone MA Length 1", group="Bottom Zone Condition")
@@ -118,3 +118,53 @@ if barstate.islast
     label.new(bar_index + 1, ma5, "MA5",
          color=color.new(color.white, 0), textcolor=color.black,
          style=label.style_label_left, size=size.small)
+
+// ══════════════════════════════════════
+// 6. 상태 패널 (우상단 고정)
+//    마지막 봉에 붙는 라벨은 스크롤·확대하면 화면에서 사라진다. 테이블은 고정된다.
+// ══════════════════════════════════════
+panelPos = input.string("top_right", "상태 패널 위치", group="상태 패널",
+     options=["top_right", "top_left", "bottom_right", "bottom_left", "middle_right"])
+panelSize = input.string("normal", "상태 패널 글자 크기", group="상태 패널",
+     options=["small", "normal", "large", "huge"])
+
+tblPos = panelPos == "top_left" ? position.top_left
+     : panelPos == "bottom_right" ? position.bottom_right
+     : panelPos == "bottom_left" ? position.bottom_left
+     : panelPos == "middle_right" ? position.middle_right
+     : position.top_right
+
+tblSize = panelSize == "small" ? size.small
+     : panelSize == "large" ? size.large
+     : panelSize == "huge" ? size.huge
+     : size.normal
+
+var table statusPanel = table.new(tblPos, 1, 2, border_width=1)
+
+holdingSupport = not na(supportPrice) and not supportBroken
+
+if barstate.islast
+    stateTxt = supportBroken   ? "✗ 지지선 깨짐 — 손절 자리"
+         : holdingSupport      ? "● 돌파 성공 — 지지선 버티는 중"
+         : isBottomZone        ? "● 바닥권 — 산 넘기를 기다리는 중"
+         : "관망 — 바닥권이 아님"
+
+    stateBg = supportBroken ? color.new(color.red, 0)
+         : holdingSupport   ? color.new(color.green, 10)
+         : isBottomZone     ? color.new(color.blue, 20)
+         : color.new(color.gray, 50)
+
+    hillTxt = na(hillLevel) ? "넘어야 할 산: 아직 없음"
+         : "넘어야 할 산: " + str.tostring(hillLevel, format.mintick)
+         + "  (" + str.tostring((hillLevel - close) / close * 100, "#.#") + "%)"
+
+    supTxt = na(supportPrice) ? "지지선: 아직 없음"
+         : "지지선: " + str.tostring(supportPrice, format.mintick)
+         + "  (" + str.tostring((close - supportPrice) / supportPrice * 100, "#.#") + "%)"
+
+    table.cell(statusPanel, 0, 0, stateTxt, bgcolor=stateBg,
+         text_color=color.white, text_size=tblSize)
+
+    table.cell(statusPanel, 0, 1, hillTxt + "\n" + supTxt,
+         bgcolor=color.new(color.gray, 20),
+         text_color=color.white, text_size=tblSize)

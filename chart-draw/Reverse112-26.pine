@@ -229,17 +229,21 @@ tblSize = panelSize == "small" ? size.small
 var table statusPanel = table.new(tblPos, 1, 2, border_width=1)
 
 if barstate.islast
-    // 1행: 역배열 여부 = 셋업 자격
-    table.cell(statusPanel, 0, 0,
-         isReverseAlign ? "● GO BUY" : "● NO BUY",
+    // 1행: 역배열 = 이 기법을 적용할 종목인지 여부.
+    // 예전 문구 "GO BUY"는 사라고 지시하는 것처럼 읽혀서 위험했다.
+    // 역배열은 출발 조건일 뿐이고, 실제 매수 자리는 아래 3/3 단계다.
+    setupTxt = isReverseAlign ? "● 살펴볼 종목 (오래 내린 상태)" : "○ 대상 아님 (아직 안 내렸음)"
+
+    table.cell(statusPanel, 0, 0, setupTxt,
          bgcolor = isReverseAlign ? color.new(color.red, 0) : color.new(color.gray, 30),
          text_color = color.white, text_size = tblSize)
 
-    // 2행: 3단계 시퀀스 진행 상황
-    stageTxt = buySignal          ? "▲ 3단계 눌림목 BUY"
-         : stage == 2             ? "② 밴드+112선 → 눌림 대기"
-         : stage == 1             ? "① 매집봉 확인 → 밴드 대기"
-         : "대기"
+    // 2행: 3단계 시퀀스를 "몇 단계까지 왔고 무엇을 기다리는지"로 표현
+    stageTxt = buySignal ? "3/3  지금이 매수 자리"
+         : stage == 2    ? "2/3  파란선 뚫음 → 눌림 기다리는 중"
+         : stage == 1    ? "1/3  큰 거래량 봉 나옴 → 파란선 뚫기를 기다리는 중"
+         : "0/3  아직 신호 없음"
+
     stageBg = buySignal ? color.new(color.lime, 0)
          : stage == 2   ? color.new(color.orange, 10)
          : stage == 1   ? color.new(#8B7355, 10)

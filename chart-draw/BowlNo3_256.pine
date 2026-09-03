@@ -273,15 +273,22 @@ if barstate.islast
          color=color.new(color.purple, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-    zoneName = isZone1 ? "1번 급락" : isZone2 ? "2번 매집"
-         : isZone3 ? "3번 돌파·눌림 대기" : isZone4 ? "4번 재상승" : "구간 외"
+    zoneName = isZone1 ? "① 아직 빠지는 중"
+         : isZone2 ? "② 바닥 다지는 중"
+         : isZone3 ? "③ 눌림 기다리는 중"
+         : isZone4 ? "④ 오르는 중"
+         : "패턴 없음"
+
+    // 왜 아직 못 사는지를 한 줄로. ✓/✗ 두 개를 나열하는 것보다 이유를 말해주는 게 낫다.
+    reasonTxt = accumBars < minAccumBars
+         ? "바닥 더 다져야 함 (" + str.tostring(minAccumBars) + "봉 필요)"
+         : accumBars < declineBars * accumRatio ? "바닥이 하락보다 짧음"
+         : "준비됨 — 224선 돌파 대기"
 
     statusTxt = zoneName
-         + "\n급락 " + str.tostring(declineBars) + "봉"
-         + " / 매집 " + str.tostring(accumBars) + "봉"
-         + "\n매집 최소길이 " + (accumBars >= minAccumBars ? "✓" : "✗")
-         + "  매집>급락 " + (accumBars >= declineBars * accumRatio ? "✓" : "✗")
-         + "\n바운스 " + str.tostring(bounceCount) + "회"
+         + "\n하락 " + str.tostring(declineBars) + "봉 → 바닥 " + str.tostring(accumBars) + "봉"
+         + "\n" + reasonTxt
+         + "\n바닥에서 튕긴 횟수 " + str.tostring(bounceCount)
 
     label.new(bar_index + 1, na(stretchLow) ? close : stretchLow, statusTxt,
          color=color.new(color.gray, 20), textcolor=color.white,
