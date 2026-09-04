@@ -106,8 +106,12 @@ minAccumBars = input.int(30, "최소 매집 구간 길이(봉)", group="3번: �
 accumRatio   = input.float(1.0, "매집/급락 길이 비율 최소값", group="3번: 돌파",
      tooltip="2번(매집)이 1번(급락)보다 몇 배 길어야 하는지.\n1.0 = 최소한 같아야 함. 올릴수록 엄격.")
 
+// ta.* 는 매 봉 호출돼야 한다. and 는 단축 평가라 왼쪽이 거짓이면 오른쪽이
+// 실행되지 않으므로, 조건식 안에 두면 내부 상태가 어긋난다 → 전역으로 뺀다.
+volHighest  = ta.highest(volume, volWindow)
+
 accumVolAvg = accumVolCnt > 0 ? accumVolSum / accumVolCnt : na
-volSpike    = not na(accumVolAvg) and ta.highest(volume, volWindow) > accumVolAvg * volMult
+volSpike    = not na(accumVolAvg) and volHighest > accumVolAvg * volMult
 
 // 뒤를 돌아본 검증: 1·2번이 제대로 형성됐는가
 patternValid = accumBars >= minAccumBars and accumBars >= declineBars * accumRatio
