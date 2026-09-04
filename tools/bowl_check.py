@@ -23,7 +23,7 @@ from datetime import datetime
 
 # ── Pine 기본값과 동일하게 유지할 것 ──────────────────────────────
 DEFAULTS = dict(
-    ma224_len=224,
+    ma224_len=224,   # Pine 기본값과 동기화
     ma20_len=20,
     ma5_len=5,
     vol_mult=1.5,

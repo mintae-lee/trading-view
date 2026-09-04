@@ -15,15 +15,37 @@ plot(bbUpperD, title="BB Upper (26-Displaced)", offset=bbDisplacement - 1,
      color=color.new(#0044ff, 0), style=plot.style_line, linewidth=1)
 
 // ── 2~4. Moving averages ──
-ma112 = ta.sma(close, 112)
-ma224 = ta.sma(close, 224)
-ma448 = ta.sma(close, 448)
+// 기간은 원본 기법 그대로 112/224/448 을 쓴다. 미국주식도 동일하다.
+//
+// 미국 관행값(50/200)으로 바꾸지 않는 이유:
+//   - 미국 50일선은 2.4개월짜리로, 이 기법이 요구하는 중기(5.5개월)의 절반도 안 된다.
+//     역할상 한국 60일선(3개월)에 가깝다.
+//   - 관행값이 작동하는 근거는 반사성(많이 보니까 반응한다)인 반면, 이 기법이
+//     224를 쓰는 근거는 "1년치 매물대"라는 원가 논리다. 논리가 다르다.
+//
+// 거래일 기준으로 환산해 115/230/461 로 바꾸는 것도 하지 않는다:
+//   - 연간 거래일이 미국 250~253 / 한국 246~248 로 거의 같아 보정폭이 3봉뿐인데,
+//     계수 자체의 불확실성(1.008~1.028)이 그 보정폭과 맞먹는다.
+//   - MA112 와 MA115 의 값 차이는 중앙값 0.19%, 역배열 판정이 뒤집히는 봉은 2.25%.
+//     사실상 같은 선이다.
+//   - 112/224/448 은 애초에 112 × {1,2,4} 인 어림값이라 유효숫자 3자리 환산은
+//     가짜 정밀도다. 게다가 115/461 을 보는 참여자는 아무도 없어 반사성도 0이다.
+//
+// ⚠ 초장기선 448 때문에 Pine Screener(마지막 500봉만 계산)로는 이 지표를 쓸 수
+//   없다 — 신호가 날 수 있는 구간이 52봉뿐이다. 차트 전용으로 볼 것.
+maMidLen   = input.int(112, "중기선 (5.5개월)",  group="역배열 판정")
+maLongLen  = input.int(224, "장기선 (11개월)", group="역배열 판정")
+maXLongLen = input.int(448, "초장기선 (22개월)", group="역배열 판정")
 
-plot(ma112, title="MA112", color=color.yellow, linewidth=1)
-plot(ma224, title="MA224", color=color.green, linewidth=1)
-plot(ma448, title="MA448", color=color.red, linewidth=1)
+maMid   = ta.sma(close, maMidLen)
+maLong  = ta.sma(close, maLongLen)
+maXLong = ta.sma(close, maXLongLen)
 
-isReverseAlign = ma112 < ma224 and ma224 < ma448
+plot(maMid,   title="MA Mid",   color=color.yellow, linewidth=1)
+plot(maLong,  title="MA Long",  color=color.green, linewidth=1)
+plot(maXLong, title="MA XLong", color=color.red, linewidth=1)
+
+isReverseAlign = maMid < maLong and maLong < maXLong
 
 // ── 5. MA 5, gray, bold ──
 ma5 = ta.sma(close, 5)
@@ -34,24 +56,23 @@ kijunLen = input.int(26, "Kijun-sen Length")
 kijunSen = (ta.highest(high, kijunLen) + ta.lowest(low, kijunLen)) / 2
 // plot(kijunSen, title="Kijun-sen", color=color.new(#FF69B4, 0), linewidth=2)
 
-// ── 7. MA 20 / MA 60 ──
+// ── 7. MA 20 (눌림목 기준선 후보) ──
+// 기존 MA60 은 제거했다. 한국 관행값 60 과 미국 관행값 50(=중기선)이 나란히
+// 그려지면 중복이고, 눌림 기준선으로는 중기선을 그대로 쓰면 된다.
 ma20 = ta.sma(close, 20)
 plot(ma20, title="MA20", color=color.new(color.white, 0), linewidth=1)
 
-ma60 = ta.sma(close, 60)
-plot(ma60, title="MA60", color=color.new(color.orange, 0), linewidth=2)
-
-// ── 8. 파란 점선(26봉 선행이동 BB 상단) 돌파·근접 + 112일선 근처 → 삼각형 ──
+// ── 8. 파란 점선(26봉 선행이동 BB 상단) 돌파·근접 + 중기선 근처 → 삼각형 ──
 //    주의: bbUpperD[bbDisplacement-1] 은 25봉 전에 계산된 밴드값이다.
 //    화면상 현재 봉 위치에 그려지는 값이라 시각적으로는 맞지만, 상승 중에는
 //    그 값이 현재가보다 한참 아래라 "high >= 밴드"가 거의 항상 참이 된다.
-//    그래서 역배열·112선 근접·1회 제한이 없으면 신호가 봉마다 뜬다.
+//    그래서 역배열·중기선 근접·1회 제한이 없으면 신호가 봉마다 뜬다.
 bandWindow   = input.int(10, "밴드 돌파 인정 윈도우(봉)", group="신호 조건",
      tooltip="'최근에 뚫었거나' — 이 봉수 이내에 돌파했으면 유효로 본다.")
 bandNearPct  = input.float(2.0, "밴드 근접 인정(%)", group="신호 조건",
      tooltip="'뚫기 직전' — 밴드 아래 이 % 이내까지 붙으면 근접으로 인정.")
-ma112NearPct = input.float(5.0, "112일선 근접 허용범위(%)", group="신호 조건",
-     tooltip="기법상 '112일선 근처'가 조건이다.\n'112일선 위'(high >= ma112)로 두면 상승 중 모든 봉이 통과한다.")
+maMidNearPct = input.float(5.0, "중기선 근접 허용범위(%)", group="신호 조건",
+     tooltip="기법상 '중기선 근처'가 조건이다.\n'중기선 위'(high >= maMid)로 두면 상승 중 모든 봉이 통과한다.")
 
 isBullish = close > open
 
@@ -59,10 +80,10 @@ isBullish = close > open
 touchedBand     = high >= bbUpperD[bbDisplacement - 1] * (1 - bandNearPct / 100)
 recentlyTouched = nz(ta.barssince(touchedBand), 9999) <= bandWindow
 
-// 112일선 "위"가 아니라 "근처"
-nearMa112 = math.abs(close - ma112) / ma112 * 100 <= ma112NearPct
+// 중기선 "위"가 아니라 "근처"
+nearMaMid = math.abs(close - maMid) / maMid * 100 <= maMidNearPct
 
-bandAndMa112 = isReverseAlign and recentlyTouched and nearMa112 and isBullish
+bandAndMaMid = isReverseAlign and recentlyTouched and nearMaMid and isBullish
 
 // ── 8-1. 1단계: 매집봉 + 지지라인 형성 ──
 //    역배열 상태에서 바닥을 다지며 "들어올렸다가 다시 빼는" 매집봉이 뜨고,
@@ -99,8 +120,8 @@ accumFresh  = not na(accumBar) and (bar_index - accumBar) <= maxAccumWait
 
 stage1Ready = accumFresh and supportHeld
 
-// ── 8-2. 2단계: 파란 점선 돌파·근접 + 112선 근처 ──
-var int stage    = 0   // 0=대기, 1=매집봉 확인, 2=밴드·112선 조건 충족(눌림 대기)
+// ── 8-2. 2단계: 파란 점선 돌파·근접 + 중기선 근처 ──
+var int stage    = 0   // 0=대기, 1=매집봉 확인, 2=밴드·중기선 조건 충족(눌림 대기)
 var int stageBar = na
 
 stage2Fired = false
@@ -115,20 +136,20 @@ if stage1Ready and stage == 0
 if stage == 1 and not supportHeld
     stage := 0   // 지지라인 이탈
 
-if stage == 1 and bandAndMa112
+if stage == 1 and bandAndMaMid
     stage       := 2
     stageBar    := bar_index
     stage2Fired := true
 
 // ── 8-3. 3단계: 눌림목 공략 ──
 //    한 번 상승한 뒤 눌러줄 때, 또는 기준 이평선을 뚫을 때/뚫기 직전.
-pullbackMaSel   = input.string("MA20", "눌림 기준 이평선", options=["MA5", "MA20", "MA60"],
+pullbackMaSel   = input.string("MA20", "눌림 기준 이평선", options=["MA5", "MA20", "중기선"],
      group="3단계: 눌림목")
 pullbackTolPct  = input.float(2.0, "눌림 인정 범위(기준선 대비 %)", group="3단계: 눌림목",
      tooltip="저가가 기준선 ±이 % 안까지 눌렸다가 종가는 기준선 위에서 양봉 마감하면 눌림 지지로 본다.")
 maxPullbackWait = input.int(20, "2단계 후 눌림 대기 최대 봉수", group="3단계: 눌림목")
 
-pullbackMa = pullbackMaSel == "MA5" ? ma5 : pullbackMaSel == "MA60" ? ma60 : ma20
+pullbackMa = pullbackMaSel == "MA5" ? ma5 : pullbackMaSel == "중기선" ? maMid : ma20
 
 pulledBack = low <= pullbackMa * (1 + pullbackTolPct / 100)
 holdsAbove = close > pullbackMa
@@ -142,7 +163,7 @@ if buySignal
 if stage == 2 and (bar_index - stageBar > maxPullbackWait)
     stage := 0
 
-plotshape(stage2Fired, title="2단계: 밴드 돌파·근접 + 112선 근처", style=shape.triangledown,
+plotshape(stage2Fired, title="2단계: 밴드 돌파·근접 + 중기선 근처", style=shape.triangledown,
      location=location.abovebar, color=color.new(color.lime, 0), size=size.tiny)
 
 plotshape(accumulationBar, title="1단계: 매집봉", style=shape.labeldown,
@@ -157,7 +178,7 @@ plotshape(buySignal, title="3단계: 눌림목 매수", style=shape.triangleup,
 plot(stage > 0 ? supportLevel : na, title="지지라인", color=color.new(#8B7355, 0),
      style=plot.style_linebr, linewidth=2)
 
-// ── 9. MA112 / MA224 / MA448 reverse alignment check (MA112 < MA224 < MA448) ──
+// ── 9. 역배열 확인 (중기선 < 장기선 < 초장기선) ──
 bgcolor(isReverseAlign ? color.new(color.red, 85) : na, title="Reverse Alignment Background")
 
 // ── 10. Ichimoku Cloud (Tenkan 9 / Kijun 26 / Senkou B 52 / displacement 26) ──
@@ -185,24 +206,20 @@ if barstate.islast
          color=color.new(#0000CD, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, ma112, "MA112",
+    label.new(bar_index + 1, maMid, "MA" + str.tostring(maMidLen),
          color=color.new(color.yellow, 0), textcolor=color.black,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, ma224, "MA224",
+    label.new(bar_index + 1, maLong, "MA" + str.tostring(maLongLen),
          color=color.new(color.green, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, ma448, "MA448",
+    label.new(bar_index + 1, maXLong, "MA" + str.tostring(maXLongLen),
          color=color.new(color.red, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
     label.new(bar_index + 1, ma5, "MA5",
          color=color.new(color.gray, 0), textcolor=color.black,
-         style=label.style_label_left, size=size.small)
-
-    label.new(bar_index + 1, ma60, "MA60",
-         color=color.new(color.orange, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
 // ══════════════════════════════════════

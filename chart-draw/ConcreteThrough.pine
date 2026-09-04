@@ -5,8 +5,23 @@
 indicator("하락후지지 돌파", overlay=true)
 
 // ── Inputs ──
-maLen1      = input.int(112, "Bottom Zone MA Length 1", group="Bottom Zone Condition")
-maLen2      = input.int(224, "Bottom Zone MA Length 2", group="Bottom Zone Condition")
+// 기간은 원본 기법 그대로 112/224/448 을 쓴다. 미국주식도 동일하다.
+//
+// 미국 관행값(50/200)으로 바꾸지 않는 이유:
+//   - 미국 50일선은 2.4개월짜리로, 이 기법이 요구하는 중기(5.5개월)의 절반도 안 된다.
+//     역할상 한국 60일선(3개월)에 가깝다.
+//   - 관행값이 작동하는 근거는 반사성(많이 보니까 반응한다)인 반면, 이 기법이
+//     224를 쓰는 근거는 "1년치 매물대"라는 원가 논리다. 논리가 다르다.
+//
+// 거래일 기준으로 환산해 115/230/461 로 바꾸는 것도 하지 않는다:
+//   - 연간 거래일이 미국 250~253 / 한국 246~248 로 거의 같아 보정폭이 3봉뿐인데,
+//     계수 자체의 불확실성(1.008~1.028)이 그 보정폭과 맞먹는다.
+//   - MA112 와 MA115 의 값 차이는 중앙값 0.19%, 역배열 판정이 뒤집히는 봉은 2.25%.
+//     사실상 같은 선이다.
+//   - 112/224/448 은 애초에 112 × {1,2,4} 인 어림값이라 유효숫자 3자리 환산은
+//     가짜 정밀도다. 게다가 115/461 을 보는 참여자는 아무도 없어 반사성도 0이다.
+maLen1      = input.int(112, "중기 이평선 (5.5개월)", group="바닥권 조건")
+maLen2      = input.int(224, "장기 이평선 (11개월)", group="바닥권 조건")
 
 pivotLeft   = input.int(5, "Hill Detection Left Bars", group="Hill Condition")
 pivotRight  = input.int(5, "Hill Detection Right Bars (Confirmation Delay)", group="Hill Condition")
@@ -18,8 +33,8 @@ volMult     = input.float(1.5, "Volume Spike Multiplier", group="Breakout Condit
 ma1 = ta.sma(close, maLen1)
 ma2 = ta.sma(close, maLen2)
 
-plot(ma1, title="MA112", color=color.new(#b91e6b, 0), linewidth=2)
-plot(ma2, title="MA224", color=color.green, linewidth=1)
+plot(ma1, title="MA Mid",  color=color.new(#b91e6b, 0), linewidth=2)
+plot(ma2, title="MA Long", color=color.green, linewidth=1)
 
 isBelowMA      = close < ma1 and close < ma2
 isReverseAlign = ma1 < ma2
@@ -33,12 +48,12 @@ plot(ma5,  title="MA5",  color=color.rgb(255, 255, 255), linewidth=2)
 // plot(ma448, title="MA448", color=color.new(#ff9900, 46), linewidth=1)
 
 // ── MA5가 MA224에 근접 시 역삼각형 표시 (최초 근접 시점만) ──
-ma5NearMa224Pct = input.float(2.0, "MA5-MA224 근접 허용범위(%)", group="근접 조건")
+ma5NearLongPct = input.float(2.0, "MA5-장기선 근접 허용범위(%)", group="근접 조건")
 
-ma5NearMa224 = math.abs(ma5 - ma2) / ma2 * 100 <= ma5NearMa224Pct
-ma5NearMa224JustNow = ma5NearMa224 and not ma5NearMa224[1]
+ma5NearLong = math.abs(ma5 - ma2) / ma2 * 100 <= ma5NearLongPct
+ma5NearLongJustNow = ma5NearLong and not ma5NearLong[1]
 
-plotshape(ma5NearMa224JustNow, title="MA5-MA224 근접", style=shape.triangledown,
+plotshape(ma5NearLongJustNow, title="MA5-장기선 근접", style=shape.triangledown,
      location=location.top, color=color.new(color.yellow, 0), size=size.small)
 
 
@@ -107,11 +122,11 @@ bgcolor(isBottomZone ? color.new(color.blue, 80) : na, title="Bottom Zone (Rever
 
 // ── Show each line's name as a label at the last bar ──
 if barstate.islast
-    label.new(bar_index + 1, ma1, "MA112",
+    label.new(bar_index + 1, ma1, "MA" + str.tostring(maLen1),
          color=color.new(#b91e6b, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, ma2, "MA224",
+    label.new(bar_index + 1, ma2, "MA" + str.tostring(maLen2),
          color=color.new(color.green, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
@@ -144,10 +159,16 @@ var table statusPanel = table.new(tblPos, 1, 2, border_width=1)
 holdingSupport = not na(supportPrice) and not supportBroken
 
 if barstate.islast
+    // 이 기법은 주가가 아직 장기선 아래에 있을 때만 판단한다.
+    // "돌파"는 장기선 돌파가 아니라 직전 중간고점(산) 돌파를 뜻하므로,
+    // 다른 스크립트(장기선 돌파)와 헷갈리지 않게 문구에 명시한다.
+    longName = "MA" + str.tostring(maLen2)
+
     stateTxt = supportBroken   ? "✗ 지지선 깨짐 — 손절 자리"
-         : holdingSupport      ? "● 돌파 성공 — 지지선 버티는 중"
-         : isBottomZone        ? "● 바닥권 — 산 넘기를 기다리는 중"
-         : "관망 — 바닥권이 아님"
+         : holdingSupport      ? "● 산 넘음 (" + longName + "은 아직 위) — 지지선 버티는 중"
+         : isBottomZone        ? "● " + longName + " 아래 바닥권 — 산 넘기를 기다리는 중"
+         : not isBelowMA       ? "관망 — 주가가 이평선 위 (아직 안 내렸음)"
+         : "관망 — 아직 역배열 아님"
 
     stateBg = supportBroken ? color.new(color.red, 0)
          : holdingSupport   ? color.new(color.green, 10)

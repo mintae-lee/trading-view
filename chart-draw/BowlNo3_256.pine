@@ -6,12 +6,12 @@ indicator("1년밥그릇256기법", overlay=true)
 // ══════════════════════════════════════
 // 기법 개요
 //   가격이 싸졌을 때 세력이 매집하여 원래 주가(혹은 그 이상)로 돌려놓는 과정을 이용한다.
-//   224일선(1년선)을 기준으로 밥그릇 패턴을 4구간으로 나눈다.
+//   장기 이평선(한국 224 = "1년선" / 미국 200)을 기준으로 4구간으로 나눈다.
 //
-//     1번 급락      고점에서 224선 아래로 밀려나 가격 메리트가 생기는 구간
+//     1번 급락      고점에서 장기선 아래로 밀려나 가격 메리트가 생기는 구간
 //     2번 매집      더 안 빠지고 횡보하며 세력이 물량을 확보하는 구간
 //                   → 1번보다 충분히 길어야 신뢰도가 높다
-//     3번 돌파·눌림  224선을 강하게 뚫어 올린 뒤 눌림목을 만드는 구간   ← 매수 자리
+//     3번 돌파·눌림  장기선을 강하게 뚫어 올린 뒤 눌림목을 만드는 구간   ← 매수 자리
 //     4번 재상승    매집을 마친 세력이 원래 주가 이상으로 슈팅시키는 구간
 //
 //   1·2번을 먼저 찾지 않는다. 3번 패턴을 먼저 찾고, 뒤를 돌아봐 1·2번이 제대로
@@ -21,23 +21,29 @@ indicator("1년밥그릇256기법", overlay=true)
 // ══════════════════════════════════════
 // 1. 이동평균선 설정
 // ══════════════════════════════════════
-ma5Len   = input.int(5,   "5일선", group="이동평균선")
-ma20Len  = input.int(20,  "20일선", group="이동평균선")
-ma60Len  = input.int(60,  "60일선", group="이동평균선")
-ma224Len = input.int(224, "224일선", group="이동평균선")
+// 기간은 원본 기법 그대로 224 를 쓴다. 미국주식도 동일하다.
+// 미국 관행값 200(9.5개월)으로 바꾸지 않는 이유, 거래일 환산값 230 으로도 바꾸지
+// 않는 이유는 Reverse112-26.pine 상단 주석 참고 — 요약하면 보정폭이 계수 자체의
+// 불확실성과 맞먹고, MA224 와 MA230 은 사실상 같은 선이다.
+//
+// ⚠ Pine Screener 는 마지막 500봉만 계산하므로 224 면 신호 구간이 276봉이다.
+ma5Len    = input.int(5,   "5일선", group="이동평균선")
+ma20Len   = input.int(20,  "20일선", group="이동평균선")
+maMidLen  = input.int(60,  "3개월선", group="이동평균선")
+maLongLen = input.int(224, "장기선 (11개월)", group="이동평균선")
 
 ma5   = ta.sma(close, ma5Len)
 ma20  = ta.sma(close, ma20Len)
-ma60  = ta.sma(close, ma60Len)
-ma224 = ta.sma(close, ma224Len)
+maMid  = ta.sma(close, maMidLen)
+maLong = ta.sma(close, maLongLen)
 
 plot(ma5,   title="MA5",   color=color.new(color.lime, 0), linewidth=2)
 plot(ma20,  title="MA20",  color=color.new(color.orange, 0), linewidth=2)
-plot(ma60,  title="MA60",  color=color.new(color.red, 0), linewidth=2)
-plot(ma224, title="MA224", color=color.new(color.purple, 0), linewidth=2)
+plot(maMid,  title="MA Mid",  color=color.new(color.red, 0), linewidth=2)
+plot(maLong, title="MA Long", color=color.new(color.purple, 0), linewidth=2)
 
 // ══════════════════════════════════════
-// 2. 224선 아래 체류 추적 → 1번(급락) / 2번(매집) 경계 산출
+// 2. 장기선 아래 체류 추적 → 1번(급락) / 2번(매집) 경계 산출
 //    경계는 "바닥권에 진입한 봉". 절대 최저점을 쓰면 안 된다 —
 //    2번에는 하락 매집(저점을 조금씩 깎으며 모으는 형태)이 포함되므로,
 //    최저점을 경계로 삼으면 매집 구간이 통째로 급락 구간에 잡아먹힌다.
@@ -54,19 +60,19 @@ recentLow    = ta.lowest(low, flatLen)
 priorLow     = ta.lowest(low, flatLen)[flatLen]
 stillFalling = not na(priorLow) and recentLow < priorLow * (1 - newLowTolPct / 100)
 
-var int   barsBelow224   = 0
-var int   stretchStart   = na   // 224선 아래로 내려간 봉
+var int   barsBelowLong   = 0
+var int   stretchStart   = na   // 장기선 아래로 내려간 봉
 var float stretchLow     = na   // 스트레치 최저가 (바닥선 표시·라벨용)
 var int   bottomEntryBar = na   // 바닥권 진입 봉 = 1번과 2번의 경계
 var float accumVolSum    = 0.0  // 매집 구간 거래량 합
 var int   accumVolCnt    = 0
 
-isBelow224 = close < ma224
+isBelowLong = close < maLong
 
-barsBelow224 := isBelow224 ? barsBelow224 + 1 : 0
+barsBelowLong := isBelowLong ? barsBelowLong + 1 : 0
 
-if isBelow224
-    if barsBelow224 == 1
+if isBelowLong
+    if barsBelowLong == 1
         stretchStart   := bar_index
         stretchLow     := low
         bottomEntryBar := bar_index
@@ -89,12 +95,12 @@ declineBars = na(bottomEntryBar) or na(stretchStart) ? 0 : bottomEntryBar - stre
 accumBars   = na(bottomEntryBar) ? 0 : bar_index - bottomEntryBar
 
 // ══════════════════════════════════════
-// 3. 3번 자리 1단계 — 224선 강한 돌파
+// 3. 3번 자리 1단계 — 장기선 강한 돌파
 // ══════════════════════════════════════
 volMult   = input.float(1.5, "돌파 거래량 배수(매집 평균 대비)", group="3번: 돌파",
-     tooltip="직전 20봉 평균과 비교하면 안 된다 — 돌파 랠리가 진행되는 동안\n이동평균이 같이 올라가 224선 교차 시점엔 배수 조건이 무력화된다.\n비교 대상은 매집 기간(2번) 전체의 평균 거래량이다.")
+     tooltip="직전 20봉 평균과 비교하면 안 된다 — 돌파 랠리가 진행되는 동안\n이동평균이 같이 올라가 장기선 교차 시점엔 배수 조건이 무력화된다.\n비교 대상은 매집 기간(2번) 전체의 평균 거래량이다.")
 volWindow = input.int(10, "거래량 판정 윈도우(봉)", group="3번: 돌파",
-     tooltip="거래량이 터지는 봉과 종가가 224선을 넘는 봉은 일치할 이유가 없다.\n교차봉 한 봉만 보면 유효한 밥그릇의 87%를 놓친다(합성 검증 기준).\n1로 두면 교차봉만 본다.")
+     tooltip="거래량이 터지는 봉과 종가가 장기선을 넘는 봉은 일치할 이유가 없다.\n교차봉 한 봉만 보면 유효한 밥그릇의 87%를 놓친다(합성 검증 기준).\n1로 두면 교차봉만 본다.")
 
 minAccumBars = input.int(30, "최소 매집 구간 길이(봉)", group="3번: 돌파")
 accumRatio   = input.float(1.0, "매집/급락 길이 비율 최소값", group="3번: 돌파",
@@ -106,22 +112,22 @@ volSpike    = not na(accumVolAvg) and ta.highest(volume, volWindow) > accumVolAv
 // 뒤를 돌아본 검증: 1·2번이 제대로 형성됐는가
 patternValid = accumBars >= minAccumBars and accumBars >= declineBars * accumRatio
 
-breakout224 = ta.crossover(close, ma224) and volSpike and patternValid
+breakoutLong = ta.crossover(close, maLong) and volSpike and patternValid
 
 // ══════════════════════════════════════
 // 4. 3번 자리 2단계 — 눌림목 진입 (매수 신호)
 // ══════════════════════════════════════
 maxPullbackWait = input.int(30, "돌파 후 눌림 대기 최대 봉수", group="3번: 눌림")
-pullbackTolPct  = input.float(3.0, "눌림 인정 범위(224선 위 %)", group="3번: 눌림",
-     tooltip="저가가 224선에서 이 % 이내까지 내려왔다가 종가는 224선 위에서 마감하면 눌림 지지로 본다.")
-failTolPct      = input.float(3.0, "돌파 실패 판정(224선 아래 %)", group="3번: 눌림")
+pullbackTolPct  = input.float(3.0, "눌림 인정 범위(장기선 위 %)", group="3번: 눌림",
+     tooltip="저가가 장기선에서 이 % 이내까지 내려왔다가 종가는 장기선 위에서 마감하면 눌림 지지로 본다.")
+failTolPct      = input.float(3.0, "돌파 실패 판정(장기선 아래 %)", group="3번: 눌림")
 
 var int   stage         = 0   // 0=대기, 1=돌파 확인(눌림 대기), 2=매수 후(4번 재상승)
 var int   breakoutBar   = na
 var int   boDeclineBars = 0   // 돌파 시점에 확정된 1번 길이
 var int   boAccumBars   = 0   // 돌파 시점에 확정된 2번 길이
 
-breakoutFired = breakout224 and stage == 0
+breakoutFired = breakoutLong and stage == 0
 
 if breakoutFired
     stage         := 1
@@ -129,9 +135,9 @@ if breakoutFired
     boDeclineBars := declineBars
     boAccumBars   := accumBars
 
-// 눌림: 저가는 224선 근처까지 눌렸는데 종가는 224선 위에서 양봉 마감
-nearSupport   = low <= ma224 * (1 + pullbackTolPct / 100)
-holdsAbove    = close > ma224
+// 눌림: 저가는 장기선 근처까지 눌렸는데 종가는 장기선 위에서 양봉 마감
+nearSupport   = low <= maLong * (1 + pullbackTolPct / 100)
+holdsAbove    = close > maLong
 pullbackEntry = stage == 1 and bar_index > breakoutBar and nearSupport and holdsAbove and close > open
 
 buySignal = pullbackEntry
@@ -139,16 +145,16 @@ buySignal = pullbackEntry
 if buySignal
     stage := 2   // 4번 재상승 구간으로
 
-// 돌파 실패: 224선을 유의미하게 이탈하면 취소
-if stage == 1 and close < ma224 * (1 - failTolPct / 100)
+// 돌파 실패: 장기선을 유의미하게 이탈하면 취소
+if stage == 1 and close < maLong * (1 - failTolPct / 100)
     stage := 0
 
 // 눌림 대기 시간 초과
 if stage == 1 and (bar_index - breakoutBar > maxPullbackWait)
     stage := 0
 
-// 4번 구간 종료: 224선 아래로 복귀하면 다음 사이클 준비
-if stage == 2 and isBelow224
+// 4번 구간 종료: 장기선 아래로 복귀하면 다음 사이클 준비
+if stage == 2 and isBelowLong
     stage := 0
 
 plotshape(buySignal, title="3번 눌림목 매수", style=shape.triangleup,
@@ -157,7 +163,7 @@ plotshape(buySignal, title="3번 눌림목 매수", style=shape.triangleup,
 
 plotshape(breakoutFired, title="3번 돌파", style=shape.flag,
      location=location.belowbar, color=color.new(color.yellow, 0),
-     textcolor=color.yellow, size=size.small, text="224 돌파")
+     textcolor=color.yellow, size=size.small, text="장기선 돌파")
 
 // 돌파 시점에 뒤쪽 1·2번 길이를 라벨로 남긴다
 if breakoutFired
@@ -194,12 +200,12 @@ isRisingLows = lowRecent > lowEarlier
 ma20Slope   = ma20 - ma20[1]
 isCurlingUp = ma20Slope > 0 and ma20Slope[halfLen] < 0
 
-bowlReady = isBelow224 and bounceCount >= minBounces and isRisingLows and isCurlingUp
+bowlReady = isBelowLong and bounceCount >= minBounces and isRisingLows and isCurlingUp
      and ma5 > ma20 and ma5 > ma5[1]
 
 var bool bowlFired = false
 
-if not isBelow224 or ma5 < ma20
+if not isBelowLong or ma5 < ma20
     bowlFired := false
 
 bowlWatch = showWatch and bowlReady and not bowlFired
@@ -219,8 +225,8 @@ zone1Grace = input.int(10, "1번→2번 전환 유예 봉수", group="구간 표
 
 barsInBottom = na(bottomEntryBar) ? na : bar_index - bottomEntryBar
 
-isZone1 = isBelow224 and not na(barsInBottom) and barsInBottom <  zone1Grace
-isZone2 = isBelow224 and not na(barsInBottom) and barsInBottom >= zone1Grace
+isZone1 = isBelowLong and not na(barsInBottom) and barsInBottom <  zone1Grace
+isZone2 = isBelowLong and not na(barsInBottom) and barsInBottom >= zone1Grace
 isZone3 = stage == 1
 isZone4 = stage == 2
 
@@ -265,11 +271,11 @@ if barstate.islast
          color=color.new(color.orange, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, ma60, "MA60",
+    label.new(bar_index + 1, maMid, "MA" + str.tostring(maMidLen),
          color=color.new(color.red, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
-    label.new(bar_index + 1, ma224, "MA224",
+    label.new(bar_index + 1, maLong, "MA" + str.tostring(maLongLen),
          color=color.new(color.purple, 0), textcolor=color.white,
          style=label.style_label_left, size=size.small)
 
@@ -283,7 +289,7 @@ if barstate.islast
     reasonTxt = accumBars < minAccumBars
          ? "바닥 더 다져야 함 (" + str.tostring(minAccumBars) + "봉 필요)"
          : accumBars < declineBars * accumRatio ? "바닥이 하락보다 짧음"
-         : "준비됨 — 224선 돌파 대기"
+         : "준비됨 — 장기선 돌파 대기"
 
     statusTxt = zoneName
          + "\n하락 " + str.tostring(declineBars) + "봉 → 바닥 " + str.tostring(accumBars) + "봉"
