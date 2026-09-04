@@ -15,8 +15,9 @@ chart-draw/
 ├── MaHit.pine              이평때리기 — EMA 112/224/448, 112선 안착 공략
 ├── functions/
 │   └── Downtrend.pine      하락추세 판단 스니펫 (단독 실행 불가)
-└── pending/
-    └── Reverse112.pine     112지지매집 — 백업. Reverse112-26 에 통합됨
+├── pending/
+│   └── Reverse112.pine     112지지매집 — 백업. Reverse112-26 에 통합됨
+└── screener-filters.md     트레이딩뷰 스크리너 필터 (미국주식 예비 검색)
 pine-scripts-spec.md        각 지표의 상세 사양서
 tools/bowl_check.py         로직 로컬 검증 하네스
 ```
