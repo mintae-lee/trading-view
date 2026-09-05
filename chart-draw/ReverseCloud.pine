@@ -1,0 +1,339 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © busiruk
+
+//@version=6
+indicator("역배열 저평가 반등", overlay=true, max_labels_count=500)
+
+// ══════════════════════════════════════
+// 기법 개요
+//   큰 폭으로 하락해 저평가된 종목이 바닥에서 추세를 되돌리는 초입을 잡는다.
+//
+//   ① 저평가 구간   주가가 장기선(224) 아래에 있고 이평선이 역배열
+//                   (112 < 224 < 448)이며 고점 대비 크게 빠진 구간. 붉은 배경.
+//   ② 112선 안착    그 구간에서 주가가 중기선(112) 위로 올라타 버티는 지점.
+//   ③ 선행스팬 돌파 주가가 선행스팬(구름) 위로 올라서면 우상향 전환으로 본다.
+//                   선행스팬 = 과거 52봉 (최고가+최저가)/2 를 26봉 앞에 그린 선.
+//   ④ 눌림목 타점   올라간 자리를 바로 쫓지 않고 기준선까지 눌릴 때 잡는다.
+//                   이때 이격도·볼린저 %B 로 과열된 종목을 걸러낸다.
+//
+//   ⚠ 화면상 현재 봉에 그려지는 구름은 26봉 전에 계산된 값이다. 그래서
+//     "주가가 구름 위"는 senkouSpan[displacement-1] 과 비교해야 한다.
+//     현재값(senkouSpanB)과 비교하면 26봉 미래의 선과 지금 주가를 견주는 셈이라
+//     차트에서 보이는 것과 신호가 어긋난다.
+//
+//   ⚠ 초장기선 448 때문에 Pine Screener(마지막 500봉만 계산)로는 쓸 수 없다.
+//     차트 전용이다.
+//
+//   합성 검증(급락→바닥→회복 1400봉 × 12세트, 기본값)
+//     1단계 3.58 / 2단계 3.17 / BUY 2.25 건/세트 — 전부 바닥·회복 구간에서 발생.
+//     같은 조건으로 상승만 하는 종목 12개를 돌리면 BUY 0건 — 역배열·낙폭·저평가
+//     이력 조건이 실제로 걸러내고 있다는 뜻이다.
+//     신호가 너무 잦으면 minDropPct 를 올리거나 settleBars 를 늘린다.
+// ══════════════════════════════════════
+
+// ══════════════════════════════════════
+// 1. 이평선 112 / 224 / 448
+//    기간 근거는 README 참조 — 미국주식도 그대로 쓴다.
+//    SMA 가 기본이다. "이평때리기"(MaHit)처럼 EMA 를 요구하는 기법이 아니라
+//    역배열 판정용이라 잔손질에 덜 흔들리는 SMA 가 낫다. 필요하면 아래에서 바꾼다.
+// ══════════════════════════════════════
+maType     = input.string("SMA", "이평선 종류", options=["SMA", "EMA"], group="이평선")
+maMidLen   = input.int(112, "중기선 (5.5개월)",  group="이평선")
+maLongLen  = input.int(224, "장기선 (11개월)",   group="이평선")
+maXLongLen = input.int(448, "초장기선 (22개월)", group="이평선")
+
+// 두 값을 다 계산한 뒤 고른다. ta.* 를 삼항 분기 안에서 부르면 호출되지 않는
+// 봉이 생겨 값이 틀어진다.
+f_ma(src, len) =>
+    s = ta.sma(src, len)
+    e = ta.ema(src, len)
+    maType == "EMA" ? e : s
+
+maMid   = f_ma(close, maMidLen)
+maLong  = f_ma(close, maLongLen)
+maXLong = f_ma(close, maXLongLen)
+
+ma5  = ta.sma(close, 5)
+ma20 = ta.sma(close, 20)
+
+plot(maMid,   title="MA Mid",   color=color.yellow, linewidth=2)
+plot(maLong,  title="MA Long",  color=color.new(color.green, 0), linewidth=1)
+plot(maXLong, title="MA XLong", color=color.new(color.red, 0),   linewidth=1)
+plot(ma5,     title="MA5",      color=color.new(color.gray, 0),  linewidth=2)
+plot(ma20,    title="MA20",     color=color.new(color.white, 0), linewidth=1)
+
+isReverseAlign = maMid < maLong and maLong < maXLong
+
+// ══════════════════════════════════════
+// 2. 볼린저 밴드 (20, 2)
+//    두 가지로 쓴다 — 바닥에서 하단을 찍고 올라왔는지(반등 준비)와,
+//    타점에서 상단에 붙어 있지 않은지(과열 배제).
+// ══════════════════════════════════════
+bbLen  = input.int(20,    "BB 기간", group="볼린저 밴드")
+bbMult = input.float(2.0, "BB 배수", group="볼린저 밴드")
+
+[bbBasis, bbUpper, bbLower] = ta.bb(close, bbLen, bbMult)
+
+pBbU = plot(bbUpper, title="BB Upper", color=color.new(#0044ff, 40), linewidth=1)
+pBbL = plot(bbLower, title="BB Lower", color=color.new(#0044ff, 40), linewidth=1)
+plot(bbBasis, title="BB Basis", color=color.new(#0044ff, 60), linewidth=1)
+fill(pBbU, pBbL, color=color.new(#0044ff, 94), title="BB 영역")
+
+bbWidth = bbUpper - bbLower
+// %B — 0 이면 하단, 1 이면 상단. 밴드가 붙어버린 봉에서 0 나눗셈이 나므로 방어한다.
+pctB    = bbWidth > 0 ? (close - bbLower) / bbWidth : 0.5
+
+// ══════════════════════════════════════
+// 3. 일목균형표 구름 (선행스팬 A / B)
+//    선행스팬B = 과거 52봉의 (최고가+최저가)/2 를 26봉 앞서 그린 선. 사용자 정의 그대로다.
+//    선행스팬A = (전환선+기준선)/2 를 역시 26봉 앞에 그린 선.
+// ══════════════════════════════════════
+tenkanLen    = input.int(9,  "전환선 기간",   group="일목균형표")
+kijunLen     = input.int(26, "기준선 기간",   group="일목균형표")
+senkouBLen   = input.int(52, "선행스팬B 기간", group="일목균형표")
+displacement = input.int(26, "선행 이동 봉수", group="일목균형표")
+
+cloudMode = input.string("선행스팬B 위", "추세 전환 판정", options=["선행스팬B 위", "구름 전체 위"],
+     group="일목균형표",
+     tooltip="'선행스팬B 위'는 52봉 중간값만 넘으면 인정 — 기법 정의 그대로이고 진입이 빠르다.\n'구름 전체 위'는 스팬A·B 중 높은 쪽까지 넘어야 해서 늦지만 속임수가 적다.")
+
+tenkanSen = (ta.highest(high, tenkanLen) + ta.lowest(low, tenkanLen)) / 2
+kijunSen  = (ta.highest(high, kijunLen)  + ta.lowest(low, kijunLen))  / 2
+
+senkouSpanA = (tenkanSen + kijunSen) / 2
+senkouSpanB = (ta.highest(high, senkouBLen) + ta.lowest(low, senkouBLen)) / 2
+
+pSpanA = plot(senkouSpanA, title="선행스팬A", color=color.new(color.green, 70), offset=displacement - 1)
+pSpanB = plot(senkouSpanB, title="선행스팬B", color=color.new(color.red, 70),   offset=displacement - 1)
+fill(pSpanA, pSpanB,
+     color = senkouSpanA > senkouSpanB ? color.new(color.green, 85) : color.new(color.red, 85),
+     title = "구름")
+
+// 지금 봉 자리에 그려져 있는 구름 값 (= 26봉 전에 계산된 것)
+spanAHere = senkouSpanA[displacement - 1]
+spanBHere = senkouSpanB[displacement - 1]
+cloudTop  = math.max(spanAHere, spanBHere)
+
+aboveCloud = cloudMode == "구름 전체 위" ? close > cloudTop : close > spanBHere
+
+// ══════════════════════════════════════
+// 4. 저평가 구간 — 붉은 배경
+//    역배열만으로는 부족하다. 역배열은 완만한 횡보에서도 뜨는데, 이 기법이
+//    노리는 건 "크게 얻어맞아 원가가 무너진" 자리다. 그래서 세 개를 AND 한다.
+//      ⓐ 역배열 (112 < 224 < 448)
+//      ⓑ 주가가 장기선 아래
+//      ⓒ 최근 고점 대비 낙폭이 기준 이상
+// ══════════════════════════════════════
+ddLookback  = input.int(250,   "고점 탐색 기간(봉)", group="저평가 구간",
+     tooltip="약 1년. 이 기간의 최고가 대비 낙폭으로 '큰 폭 하락'을 판정한다.")
+minDropPct  = input.float(30.0, "최소 낙폭(%)",      group="저평가 구간")
+valueMemory = input.int(120,   "저평가 이력 유효기간(봉)", group="저평가 구간",
+     tooltip="저평가 구간을 벗어난 뒤에도 이 봉수 안이면 '바닥에서 올라온 종목'으로 인정한다.\n112선 안착 시점엔 이미 배경이 꺼져 있는 경우가 많아 이력이 필요하다.")
+
+runHigh = ta.highest(high, ddLookback)
+dropPct = runHigh > 0 ? (runHigh - close) / runHigh * 100 : 0.0
+
+belowLong   = close < maLong
+isDeepValue = isReverseAlign and belowLong and dropPct >= minDropPct
+
+// 배경 두 단계 — 옅은 빨강은 역배열일 뿐, 진한 빨강이 실제 공략 대상 구간이다.
+bgcolor(isDeepValue ? color.new(color.red, 78)
+     : isReverseAlign ? color.new(color.red, 92) : na, title="저평가 구간 배경")
+
+deepValueRecent = isDeepValue or nz(ta.barssince(isDeepValue), 9999) <= valueMemory
+
+// ══════════════════════════════════════
+// 5. 1단계 — 112선 안착
+//    "종가가 한 번 넘었다"로는 부족하다. 바닥권은 112선을 두고 오르내리기 때문에
+//    단순 돌파로 잡으면 같은 자리에서 신호가 반복된다. settleBars 봉을 버텨야 인정.
+// ══════════════════════════════════════
+settleBars = input.int(3, "112선 안착 인정 봉수", group="1단계: 112선 안착",
+     tooltip="중기선 위로 올라선 뒤 이 봉수 동안 종가가 아래로 안 떨어져야 안착으로 본다.\n1로 두면 단순 돌파가 된다.")
+
+requireLowerBand = input.bool(true, "바닥에서 BB 하단 이탈 이력 요구", group="1단계: 112선 안착",
+     tooltip="바닥에서 밴드 하단을 찍고 올라온 종목만 본다.\n큰 하락이면 대개 충족되는 약한 필터다 — 신호가 너무 적으면 먼저 꺼볼 것.")
+lowerBandLookback = input.int(120, "BB 하단 이탈 탐색 기간(봉)", group="1단계: 112선 안착")
+
+aboveMid     = close > maMid
+barsAboveMid = nz(ta.barssince(not aboveMid), 9999)
+settled      = aboveMid and barsAboveMid >= settleBars
+justSettled  = settled and not settled[1]
+
+touchedLower  = nz(ta.barssince(close < bbLower), 9999) <= lowerBandLookback
+lowerBandOk   = not requireLowerBand or touchedLower
+
+stage1Trigger = justSettled and deepValueRecent and lowerBandOk
+
+// ══════════════════════════════════════
+// 6~7. 단계 진행 (1 → 2 → 매수)
+// ══════════════════════════════════════
+maxCloudWait    = input.int(40, "안착 후 구름 돌파 대기 최대 봉수", group="2단계: 선행스팬 돌파")
+maxPullbackWait = input.int(20, "구름 돌파 후 눌림 대기 최대 봉수", group="3단계: 눌림목")
+
+pullbackBaseSel = input.string("MA20", "눌림 기준선", options=["MA5", "MA20", "BB 중심선", "중기선"],
+     group="3단계: 눌림목")
+pullbackTolPct  = input.float(2.0, "눌림 인정 범위(기준선 대비 %)", group="3단계: 눌림목",
+     tooltip="저가가 기준선 +이 % 안까지 눌렸다가 종가는 기준선 위에서 양봉 마감하면 눌림 지지로 본다.")
+
+// 과열 배제 — 이격도와 볼린저 %B. 이 기법의 "정밀 타점" 장치다.
+// 바닥에서 반등을 준비하는 자리만 잡고, 이미 달린 종목은 여기서 떨어져 나간다.
+maxDisparity20  = input.float(110.0, "MA20 이격도 상한(%)",  group="과열 배제",
+     tooltip="이격도 = 주가 / 이평 × 100. 110 이면 MA20 보다 10% 넘게 뜬 봉은 제외.")
+maxDisparityMid = input.float(120.0, "112선 이격도 상한(%)", group="과열 배제",
+     tooltip="112선 위로 막 올라탄 자리를 노리는 기법이다. 이미 20% 넘게 벌어졌으면 늦었다.")
+maxPctB         = input.float(0.85,  "BB %B 상한",           group="과열 배제",
+     tooltip="1 이면 밴드 상단. 상단에 붙어 달리는 봉은 눌림목이 아니라 추격이다.")
+
+// 이평이 아직 없는 초기 봉에서는 na 가 아니라 100(=이격 없음)으로 둔다.
+// na 를 불리언 사슬에 넣으면 조건 전체가 na 로 번져 판정이 흐려진다.
+disparity20  = ma20  > 0 ? close / ma20  * 100 : 100.0
+disparityMid = maMid > 0 ? close / maMid * 100 : 100.0
+
+notOverheated = disparity20 <= maxDisparity20 and disparityMid <= maxDisparityMid and pctB <= maxPctB
+
+pullbackBase = pullbackBaseSel == "MA5" ? ma5
+     : pullbackBaseSel == "BB 중심선"   ? bbBasis
+     : pullbackBaseSel == "중기선"      ? maMid
+     : ma20
+
+isBullish  = close > open
+pulledBack = low <= pullbackBase * (1 + pullbackTolPct / 100)
+holdsAbove = close > pullbackBase
+
+var int stage    = 0    // 0=대기, 1=112선 안착, 2=구름 위(눌림 대기)
+var int stageBar = na
+
+cloudFired = false
+
+if stage1Trigger and stage == 0
+    stage    := 1
+    stageBar := bar_index
+
+// 112선을 종가로 내주면 셋업 무효. 안착이 깨진 것이므로 처음부터 다시 본다.
+if stage > 0 and close < maMid
+    stage := 0
+
+if stage == 1 and aboveCloud
+    stage      := 2
+    stageBar   := bar_index
+    cloudFired := true
+
+buySignal = stage == 2 and bar_index > stageBar and pulledBack and holdsAbove
+     and isBullish and aboveCloud and notOverheated
+
+if buySignal
+    stage := 0   // 타점 소비. 다음 사이클은 새 안착부터 다시 센다.
+
+// 단계별 타임아웃 — 오래 끌면 그 셋업은 죽은 것으로 본다
+if stage == 1 and bar_index - stageBar > maxCloudWait
+    stage := 0
+if stage == 2 and bar_index - stageBar > maxPullbackWait
+    stage := 0
+
+plotshape(stage1Trigger, title="1단계: 112선 안착", style=shape.circle,
+     location=location.belowbar, color=color.new(color.orange, 0),
+     textcolor=color.orange, size=size.tiny, text="112↑")
+
+plotshape(cloudFired, title="2단계: 선행스팬 돌파", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.aqua, 0), size=size.tiny)
+
+plotshape(buySignal, title="3단계: 눌림목 매수", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.lime, 0),
+     textcolor=color.lime, size=size.small, text="BUY")
+
+// 진행 중인 셋업 동안 112선을 굵게 — 이 선이 손절 기준이다
+plot(stage > 0 ? maMid : na, title="진행 중 112선(손절 기준)",
+     color=color.new(color.orange, 0), style=plot.style_linebr, linewidth=2)
+
+// ══════════════════════════════════════
+// 8. 상태 패널 (우상단 고정)
+//    마지막 봉 라벨은 스크롤하면 사라진다. 테이블은 위치가 고정된다.
+// ══════════════════════════════════════
+panelPos = input.string("top_right", "상태 패널 위치", group="상태 패널",
+     options=["top_right", "top_left", "bottom_right", "bottom_left", "middle_right"])
+panelSize = input.string("normal", "상태 패널 글자 크기", group="상태 패널",
+     options=["small", "normal", "large", "huge"])
+
+tblPos = panelPos == "top_left" ? position.top_left
+     : panelPos == "bottom_right" ? position.bottom_right
+     : panelPos == "bottom_left" ? position.bottom_left
+     : panelPos == "middle_right" ? position.middle_right
+     : position.top_right
+
+tblSize = panelSize == "small" ? size.small
+     : panelSize == "large" ? size.large
+     : panelSize == "huge" ? size.huge
+     : size.normal
+
+var table statusPanel = table.new(tblPos, 1, 3, border_width=1)
+
+if barstate.islast
+    // 1행: 지금 이 종목이 이 기법의 대상인지
+    zoneTxt = isDeepValue        ? "● 저평가 구간 (역배열 + 장기선 아래 + 큰 낙폭)"
+         : deepValueRecent       ? "◐ 저평가 구간에서 막 벗어남 (아직 유효)"
+         : isReverseAlign        ? "○ 역배열이지만 낙폭·위치 미달"
+         : "○ 대상 아님 (아직 안 내렸음)"
+
+    zoneBg = isDeepValue  ? color.new(color.red, 0)
+         : deepValueRecent ? color.new(color.maroon, 20)
+         : color.new(color.gray, 50)
+
+    // 2행: 어디까지 왔고 무엇을 기다리는지
+    stageTxt = buySignal ? "3/3  지금이 매수 자리"
+         : stage == 2    ? "2/3  구름 위 — 눌림 기다리는 중"
+         : stage == 1    ? "1/3  112선 안착 — 구름 돌파를 기다리는 중"
+         : not deepValueRecent ? "0/3  저평가 구간부터 나와야 함"
+         : not aboveMid  ? "0/3  112선 위로 올라서길 기다림"
+         : "0/3  112선 위 — 안착 확인 중 (" + str.tostring(math.min(barsAboveMid, settleBars))
+           + "/" + str.tostring(settleBars) + "봉)"
+
+    stageBg = buySignal ? color.new(color.lime, 0)
+         : stage == 2   ? color.new(color.orange, 10)
+         : stage == 1   ? color.new(color.blue, 20)
+         : color.new(color.gray, 60)
+
+    // 3행: 판단 근거 수치
+    toCloud = (spanBHere - close) / close * 100
+    detailTxt = "낙폭 " + str.tostring(dropPct, "#.#") + "%"
+         + "   이격도 MA20 " + str.tostring(disparity20, "#.#")
+         + " / 112선 " + str.tostring(disparityMid, "#.#")
+         + "\n%B " + str.tostring(pctB, "#.##")
+         + (notOverheated ? "  (과열 아님)" : "  ⚠ 과열 — 타점 제외")
+         + "\n선행스팬B까지 " + str.tostring(toCloud, "#.#") + "%"
+         + (aboveCloud ? "  (이미 위)" : "")
+
+    table.cell(statusPanel, 0, 0, zoneTxt, bgcolor=zoneBg,
+         text_color=color.white, text_size=tblSize)
+    table.cell(statusPanel, 0, 1, stageTxt, bgcolor=stageBg,
+         text_color=buySignal ? color.black : color.white, text_size=tblSize)
+    table.cell(statusPanel, 0, 2, detailTxt, bgcolor=color.new(color.gray, 20),
+         text_color=color.white, text_size=size.small)
+
+// ══════════════════════════════════════
+// 9. 마지막 봉에 선 이름 표시
+// ══════════════════════════════════════
+if barstate.islast
+    label.new(bar_index + 1, maMid, maType + str.tostring(maMidLen),
+         color=color.new(color.yellow, 0), textcolor=color.black,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, maLong, maType + str.tostring(maLongLen),
+         color=color.new(color.green, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, maXLong, maType + str.tostring(maXLongLen),
+         color=color.new(color.red, 0), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, bbUpper, "BB Upper",
+         color=color.new(#0044ff, 30), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    label.new(bar_index + 1, bbLower, "BB Lower",
+         color=color.new(#0044ff, 30), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
+
+    // 선행이동된 선의 오른쪽 끝에 붙인다
+    label.new(bar_index + displacement - 1, senkouSpanB, "선행스팬B(52)",
+         color=color.new(color.red, 30), textcolor=color.white,
+         style=label.style_label_left, size=size.small)
