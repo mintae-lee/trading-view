@@ -343,6 +343,7 @@ if barstate.islast and not na(vpHi) and not na(vpLo) and vpHi > vpLo
             price = vpLo + step * (idx + 0.5)
             share = total > 0 ? v / total * 100 : 0.0
             col   = k == 0 ? color.new(#FF9800, 0) : color.new(#FF9800, 60)
+            textCol = k == 0 ? color.black : color.new(color.white, 0)
 
             array.push(vpLines, line.new(bar_index - nBars + 1, price, bar_index + 10, price,
                  color=col, width=k == 0 ? 2 : 1,
@@ -351,7 +352,7 @@ if barstate.islast and not na(vpHi) and not na(vpLo) and vpHi > vpLo
             array.push(vpLabels, label.new(bar_index + 10, price,
                  (k == 0 ? "최대 매물대 " : "매물대 ") + str.tostring(price, format.mintick)
                  + "  " + str.tostring(share, "#.#") + "%",
-                 color=col, textcolor=color.black,
+                 color=col, textcolor=textCol,
                  style=label.style_label_left, size=size.small))
 
 // ══════════════════════════════════════
