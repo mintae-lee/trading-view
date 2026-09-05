@@ -2,7 +2,7 @@
 // © busiruk
 
 //@version=6
-indicator("역배열 저평가 반등", overlay=true, max_labels_count=500)
+indicator("역배열 저평가 반등", overlay=true, max_labels_count=500, max_bars_back=1000)
 
 // ══════════════════════════════════════
 // 기법 개요
@@ -15,6 +15,9 @@ indicator("역배열 저평가 반등", overlay=true, max_labels_count=500)
 //                   선행스팬 = 과거 52봉 (최고가+최저가)/2 를 26봉 앞에 그린 선.
 //   ④ 눌림목 타점   올라간 자리를 바로 쫓지 않고 기준선까지 눌릴 때 잡는다.
 //                   이때 이격도·볼린저 %B 로 과열된 종목을 걸러낸다.
+//   ⑤ 매물대 확인   위쪽에 매물벽이 얼마나 두터운지 본다. 얇으면 저항이 적어
+//                   잘 오르고(MaHit 의 "공짜 라인"과 같은 논리), 두터우면 그 벽이
+//                   1차 목표이자 손실 구간이 된다. 매수 조건은 아니고 판단 재료다.
 //
 //   ⚠ 화면상 현재 봉에 그려지는 구름은 26봉 전에 계산된 값이다. 그래서
 //     "주가가 구름 위"는 senkouSpan[displacement-1] 과 비교해야 한다.
@@ -140,7 +143,11 @@ isDeepValue = isReverseAlign and belowLong and dropPct >= minDropPct
 bgcolor(isDeepValue ? color.new(color.red, 78)
      : isReverseAlign ? color.new(color.red, 92) : na, title="저평가 구간 배경")
 
-deepValueRecent = isDeepValue or nz(ta.barssince(isDeepValue), 9999) <= valueMemory
+// ta.barssince 는 반드시 매 봉 호출돼야 한다. and/or 는 단축 평가라 조건식 안에
+// 넣으면 건너뛰는 봉이 생기고, 그러면 내부 카운터가 어긋난다. 밖으로 뺀다.
+// (isDeepValue 인 봉에서는 barssince 가 0 이므로 별도 or 조건도 필요 없다)
+barsSinceDeep   = nz(ta.barssince(isDeepValue), 9999)
+deepValueRecent = barsSinceDeep <= valueMemory
 
 // ══════════════════════════════════════
 // 5. 1단계 — 112선 안착
@@ -245,8 +252,110 @@ plotshape(buySignal, title="3단계: 눌림목 매수", style=shape.triangleup,
 plot(stage > 0 ? maMid : na, title="진행 중 112선(손절 기준)",
      color=color.new(color.orange, 0), style=plot.style_linebr, linewidth=2)
 
+
 // ══════════════════════════════════════
-// 8. 상태 패널 (우상단 고정)
+// 8. 매물대 (Volume Profile)
+//    가격대를 vpBins 개로 쪼개고, 과거 vpLookback 봉의 거래량을 각 봉이 걸친
+//    구간에 "겹친 비율만큼" 나눠 담는다. 봉의 중간값 한 점에 전량을 몰아넣는
+//    방식보다 정확하다 — 장대봉 하나가 특정 가격대를 통째로 만들어내지 않는다.
+//
+//    ⚠ 마지막 봉에서만 계산한다. 봉마다 250×구간 만큼 도는 이중 루프라
+//      매 봉 돌리면 스크립트가 느려지고, 어차피 결과는 "지금 기준 매물대"다.
+//      실시간 봉은 틱마다 다시 그려지므로 이전 선·라벨을 지우고 새로 그린다.
+// ══════════════════════════════════════
+showVP     = input.bool(true, "매물대 수평선 표시", group="매물대")
+vpLookback = input.int(250, "매물대 산출 기간(봉)", minval=20, maxval=1000, group="매물대",
+     tooltip="약 1년. 저평가 구간 판정(고점 탐색 기간)과 같은 길이로 맞춰둔 값이다.")
+vpBins     = input.int(24, "가격 구간 수", minval=4, maxval=100, group="매물대",
+     tooltip="많을수록 매물대가 뾰족해지고 적을수록 뭉툭해진다. 24 면 구간당 약 4%.")
+vpTopN     = input.int(3, "표시할 상위 매물대 수", minval=1, maxval=5, group="매물대")
+
+vpHi = ta.highest(high, vpLookback)
+vpLo = ta.lowest(low, vpLookback)
+
+var float pocPrice   = na   // 최대 매물대 가격
+var float pocShare   = na   // 그 구간이 차지하는 거래량 비중(%)
+var float aboveShare = na   // 현재가 "위"에 쌓인 매물 비중(%) — 저항의 두께
+
+var line[]  vpLines  = array.new<line>()
+var label[] vpLabels = array.new<label>()
+
+if barstate.islast and not na(vpHi) and not na(vpLo) and vpHi > vpLo
+    if array.size(vpLines) > 0
+        for i = 0 to array.size(vpLines) - 1
+            line.delete(array.get(vpLines, i))
+        array.clear(vpLines)
+    if array.size(vpLabels) > 0
+        for i = 0 to array.size(vpLabels) - 1
+            label.delete(array.get(vpLabels, i))
+        array.clear(vpLabels)
+
+    step  = (vpHi - vpLo) / vpBins
+    bins  = array.new_float(vpBins, 0.0)
+    nBars = math.min(vpLookback, bar_index + 1)
+
+    for i = 0 to nBars - 1
+        bh  = high[i]
+        bl  = low[i]
+        bv  = volume[i]
+        rng = bh - bl
+        if rng <= 0
+            // 고가=저가 인 봉(상·하한가 등)은 그 가격 구간에 전량 넣는다
+            bi = int(math.min(vpBins - 1, math.max(0, math.floor((bl - vpLo) / step))))
+            array.set(bins, bi, array.get(bins, bi) + bv)
+        else
+            b0 = int(math.min(vpBins - 1, math.max(0, math.floor((bl - vpLo) / step))))
+            b1 = int(math.min(vpBins - 1, math.floor((bh - vpLo) / step)))
+            for b = b0 to b1
+                binLo = vpLo + step * b
+                binHi = binLo + step
+                ov    = math.min(bh, binHi) - math.max(bl, binLo)
+                if ov > 0
+                    array.set(bins, b, array.get(bins, b) + bv * ov / rng)
+
+    total  = array.sum(bins)
+    pocVol = array.max(bins)
+    pocIdx = array.indexof(bins, pocVol)
+
+    pocPrice := vpLo + step * (pocIdx + 0.5)
+    pocShare := total > 0 ? pocVol / total * 100 : na
+
+    // 현재가 위쪽 매물 — 걸쳐 있는 구간은 비례 배분한다
+    av = 0.0
+    for b = 0 to vpBins - 1
+        binLo = vpLo + step * b
+        binHi = binLo + step
+        if binLo >= close
+            av := av + array.get(bins, b)
+        else if binHi > close
+            av := av + array.get(bins, b) * (binHi - close) / step
+    aboveShare := total > 0 ? av / total * 100 : na
+
+    if showVP
+        work = array.copy(bins)
+        for k = 0 to math.min(vpTopN, vpBins) - 1
+            v = array.max(work)
+            if v <= 0
+                break
+            idx = array.indexof(work, v)
+            array.set(work, idx, -1.0)
+
+            price = vpLo + step * (idx + 0.5)
+            share = total > 0 ? v / total * 100 : 0.0
+            col   = k == 0 ? color.new(#FF9800, 0) : color.new(#FF9800, 60)
+
+            array.push(vpLines, line.new(bar_index - nBars + 1, price, bar_index + 10, price,
+                 color=col, width=k == 0 ? 2 : 1,
+                 style=k == 0 ? line.style_solid : line.style_dotted))
+
+            array.push(vpLabels, label.new(bar_index + 10, price,
+                 (k == 0 ? "최대 매물대 " : "매물대 ") + str.tostring(price, format.mintick)
+                 + "  " + str.tostring(share, "#.#") + "%",
+                 color=col, textcolor=color.black,
+                 style=label.style_label_left, size=size.small))
+
+// ══════════════════════════════════════
+// 9. 상태 패널 (우상단 고정)
 //    마지막 봉 라벨은 스크롤하면 사라진다. 테이블은 위치가 고정된다.
 // ══════════════════════════════════════
 panelPos = input.string("top_right", "상태 패널 위치", group="상태 패널",
@@ -265,7 +374,7 @@ tblSize = panelSize == "small" ? size.small
      : panelSize == "huge" ? size.huge
      : size.normal
 
-var table statusPanel = table.new(tblPos, 1, 3, border_width=1)
+var table statusPanel = table.new(tblPos, 1, 4, border_width=1)
 
 if barstate.islast
     // 1행: 지금 이 종목이 이 기법의 대상인지
@@ -309,8 +418,28 @@ if barstate.islast
     table.cell(statusPanel, 0, 2, detailTxt, bgcolor=color.new(color.gray, 20),
          text_color=color.white, text_size=size.small)
 
+    // 4행: 매물대 — 최대 매물대 위치와 머리 위 저항의 두께
+    //      위쪽 매물이 얇으면 저항이 적어 잘 오른다("공짜 라인"). 두꺼우면
+    //      그 벽이 1차 목표이자 물릴 자리다. 매수 조건이 아니라 판단 재료다.
+    vpTxt = na(pocPrice) ? "매물대 계산 불가 (데이터 부족)"
+         : "최대 매물대 " + str.tostring(pocPrice, format.mintick)
+           + " (현재가 대비 " + (pocPrice >= close ? "+" : "")
+           + str.tostring((pocPrice - close) / close * 100, "#.#") + "%"
+           + ", 비중 " + str.tostring(pocShare, "#.#") + "%)"
+           + "\n머리 위 매물 " + str.tostring(aboveShare, "#.#") + "% — "
+           + (aboveShare < 20 ? "얇음 (저항 적음)"
+              : aboveShare < 40 ? "보통" : "두꺼움 (돌파 부담)")
+
+    vpBg = na(aboveShare) ? color.new(color.gray, 40)
+         : aboveShare < 20 ? color.new(color.green, 25)
+         : aboveShare < 40 ? color.new(color.gray, 20)
+         : color.new(#FF9800, 25)
+
+    table.cell(statusPanel, 0, 3, vpTxt, bgcolor=vpBg,
+         text_color=color.white, text_size=size.small)
+
 // ══════════════════════════════════════
-// 9. 마지막 봉에 선 이름 표시
+// 10. 마지막 봉에 선 이름 표시
 // ══════════════════════════════════════
 if barstate.islast
     label.new(bar_index + 1, maMid, maType + str.tostring(maMidLen),
