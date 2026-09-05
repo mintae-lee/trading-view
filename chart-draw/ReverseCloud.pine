@@ -259,6 +259,20 @@ plot(stage > 0 ? maMid : na, title="진행 중 112선(손절 기준)",
 //    구간에 "겹친 비율만큼" 나눠 담는다. 봉의 중간값 한 점에 전량을 몰아넣는
 //    방식보다 정확하다 — 장대봉 하나가 특정 가격대를 통째로 만들어내지 않는다.
 //
+//    선이 여러 개일 때 각각의 뜻:
+//      1위 (주황 굵은 실선) = 최대 매물대(POC). 이 가격대에서 손바뀜이 가장 많았다.
+//        지금 주가보다 위면 가장 두꺼운 저항, 아래면 가장 단단한 지지다.
+//      2·3위 (점선) = 그 다음으로 두꺼운 매물벽. 위쪽 것은 상승 시 1차 저항이자
+//        현실적인 목표가, 아래쪽 것은 눌릴 때 받쳐줄 자리다.
+//      라벨의 ↑저항 / ↓지지 는 현재가 기준 위·아래를 표시한 것이다.
+//
+//    ⚠ 봉우리 바로 옆 칸이 "2위"로 뽑히면 같은 벽에 선만 두세 개 겹친다.
+//      실제로 합성 검증에서 상위 3개 중 인접 구간이 섞인 비율이 70% 였다.
+//      그래서 vpMinGap 구간 이상 떨어진 봉우리만 고른다 (적용 후 0%).
+//
+//    ⚠ 비중은 봉우리 한 칸이 아니라 ±1구간을 합친 "벽 전체"로 센다. 한 칸만
+//      세면 같은 벽이 두 칸에 걸쳤을 때 두께가 절반으로 보인다(13.6% vs 29.8%).
+//
 //    ⚠ 마지막 봉에서만 계산한다. 봉마다 250×구간 만큼 도는 이중 루프라
 //      매 봉 돌리면 스크립트가 느려지고, 어차피 결과는 "지금 기준 매물대"다.
 //      실시간 봉은 틱마다 다시 그려지므로 이전 선·라벨을 지우고 새로 그린다.
@@ -269,6 +283,8 @@ vpLookback = input.int(250, "매물대 산출 기간(봉)", minval=20, maxval=10
 vpBins     = input.int(24, "가격 구간 수", minval=4, maxval=100, group="매물대",
      tooltip="많을수록 매물대가 뾰족해지고 적을수록 뭉툭해진다. 24 면 구간당 약 4%.")
 vpTopN     = input.int(3, "표시할 상위 매물대 수", minval=1, maxval=5, group="매물대")
+vpMinGap   = input.int(3, "매물대 간 최소 간격(구간)", minval=1, maxval=20, group="매물대",
+     tooltip="이 간격보다 가까운 봉우리는 같은 매물벽으로 보고 하나만 표시한다.\n1 로 두면 옆 칸이 '2위 매물대'로 뽑혀 한 벽에 선이 겹친다.")
 
 vpHi = ta.highest(high, vpLookback)
 vpLo = ta.lowest(low, vpLookback)
@@ -318,7 +334,12 @@ if barstate.islast and not na(vpHi) and not na(vpLo) and vpHi > vpLo
     pocIdx = array.indexof(bins, pocVol)
 
     pocPrice := vpLo + step * (pocIdx + 0.5)
-    pocShare := total > 0 ? pocVol / total * 100 : na
+
+    // 봉우리 한 칸이 아니라 ±1구간 합 = 그 벽의 실제 두께
+    pocZone = 0.0
+    for b = math.max(0, pocIdx - 1) to math.min(vpBins - 1, pocIdx + 1)
+        pocZone := pocZone + array.get(bins, b)
+    pocShare := total > 0 ? pocZone / total * 100 : na
 
     // 현재가 위쪽 매물 — 걸쳐 있는 구간은 비례 배분한다
     av = 0.0
@@ -332,28 +353,42 @@ if barstate.islast and not na(vpHi) and not na(vpLo) and vpHi > vpLo
     aboveShare := total > 0 ? av / total * 100 : na
 
     if showVP
-        work = array.copy(bins)
-        for k = 0 to math.min(vpTopN, vpBins) - 1
+        work   = array.copy(bins)
+        picked = 0
+        for k = 0 to vpBins - 1
+            if picked >= vpTopN
+                break
             v = array.max(work)
             if v <= 0
                 break
             idx = array.indexof(work, v)
-            array.set(work, idx, -1.0)
+
+            // 봉우리와 그 주변을 통째로 소거 — 옆 칸이 "다음 매물대"로 뽑히는 걸 막는다
+            for j = math.max(0, idx - vpMinGap + 1) to math.min(vpBins - 1, idx + vpMinGap - 1)
+                array.set(work, j, -1.0)
 
             price = vpLo + step * (idx + 0.5)
-            share = total > 0 ? v / total * 100 : 0.0
-            col   = k == 0 ? color.new(#FF9800, 0) : color.new(#FF9800, 60)
-            textCol = k == 0 ? color.black : color.new(color.white, 0)
+
+            zv = 0.0
+            for j = math.max(0, idx - 1) to math.min(vpBins - 1, idx + 1)
+                zv := zv + array.get(bins, j)
+            share = total > 0 ? zv / total * 100 : 0.0
+
+            isRes = price >= close   // 현재가 위 = 저항, 아래 = 지지
+            col   = picked == 0 ? color.new(#FF9800, 0) : color.new(#FF9800, 60)
 
             array.push(vpLines, line.new(bar_index - nBars + 1, price, bar_index + 10, price,
-                 color=col, width=k == 0 ? 2 : 1,
-                 style=k == 0 ? line.style_solid : line.style_dotted))
+                 color=col, width=picked == 0 ? 2 : 1,
+                 style=picked == 0 ? line.style_solid : line.style_dotted))
 
             array.push(vpLabels, label.new(bar_index + 10, price,
-                 (k == 0 ? "최대 매물대 " : "매물대 ") + str.tostring(price, format.mintick)
-                 + "  " + str.tostring(share, "#.#") + "%",
-                 color=col, textcolor=textCol,
+                 (picked == 0 ? "최대 매물대 " : str.tostring(picked + 1) + "위 매물대 ")
+                 + str.tostring(price, format.mintick)
+                 + "  " + (isRes ? "↑저항 " : "↓지지 ") + str.tostring(share, "#.#") + "%",
+                 color=col, textcolor=color.white,
                  style=label.style_label_left, size=size.small))
+
+            picked := picked + 1
 
 // ══════════════════════════════════════
 // 9. 상태 패널 (우상단 고정)
@@ -426,7 +461,7 @@ if barstate.islast
          : "최대 매물대 " + str.tostring(pocPrice, format.mintick)
            + " (현재가 대비 " + (pocPrice >= close ? "+" : "")
            + str.tostring((pocPrice - close) / close * 100, "#.#") + "%"
-           + ", 비중 " + str.tostring(pocShare, "#.#") + "%)"
+           + ", 벽 비중 " + str.tostring(pocShare, "#.#") + "%)"
            + "\n머리 위 매물 " + str.tostring(aboveShare, "#.#") + "% — "
            + (aboveShare < 20 ? "얇음 (저항 적음)"
               : aboveShare < 40 ? "보통" : "두꺼움 (돌파 부담)")
