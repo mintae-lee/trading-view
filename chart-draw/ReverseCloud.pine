@@ -239,7 +239,7 @@ if stage == 2 and bar_index - stageBar > maxPullbackWait
 
 plotshape(stage1Trigger, title="1단계: 112선 안착", style=shape.circle,
      location=location.belowbar, color=color.new(color.orange, 0),
-     textcolor=color.orange, size=size.tiny, text="112↑")
+     textcolor=color.orange, size=size.tiny, text="112근접")
 
 plotshape(cloudFired, title="2단계: 선행스팬 돌파", style=shape.triangledown,
      location=location.abovebar, color=color.new(color.aqua, 0), size=size.tiny)
