@@ -4,6 +4,28 @@
 //@version=6
 indicator("하락후지지 돌파", overlay=true)
 
+// ══════════════════════════════════════
+// 기법 개요 — 공구리 기법 (단기)
+//   건물을 지을 때 공구리를 쳐서 바닥을 다지듯, 주가가 바닥을 만드는 모습을 잡는다.
+//
+//   224선 아래에서 고점·저점을 낮추며 하락하던 주가가 하락을 멈추고 하락 박스를
+//   돌파한 뒤, 되밀릴 때 "바로 직전의 언덕"이 지지가 되는 것을 공구리라고 한다.
+//   공구리가 나온 것을 보고 주가가 바닥을 만들었음을 안다.
+//
+//   ⚠ 신호는 돌파가 아니라 "지지 확인"이다. 돌파만 보고 공구리라 부르면 되밀려
+//     언덕을 뚫고 내려가는 실패한 돌파에도 신호가 붙는다.
+//
+//   두 가지 모드
+//     하락 박스   224선 아래 바닥권. 이번 언덕이 그 전 언덕보다 낮아야(고점 하락) 한다.
+//     엘리엇 1파  바닥권에서 올라와 224선 근처 언덕을 뚫은 1파가 눌릴 때도
+//                 그 언덕이 지지되면 공구리로 본다.
+//
+//   검증: tools/concrete_check.py --selftest
+//     합성 10 seed × (정상 / 언덕 뚫고 하락 / 횡보 박스 / 엘리엇 1파) 전부 통과.
+//     수정 전 로직(상승 선행·고점 하락 조건 없음)으로 돌리면 돌파 다음 봉에 바로
+//     공구리가 확정되고, 실패한 돌파와 횡보 박스도 전부 통과한다.
+// ══════════════════════════════════════
+
 // ── Inputs ──
 // 기간은 원본 기법 그대로 112/224/448 을 쓴다. 미국주식도 동일하다.
 //
@@ -23,102 +45,183 @@ indicator("하락후지지 돌파", overlay=true)
 maLen1      = input.int(112, "중기 이평선 (5.5개월)", group="바닥권 조건")
 maLen2      = input.int(224, "장기 이평선 (11개월)", group="바닥권 조건")
 
-pivotLeft   = input.int(5, "Hill Detection Left Bars", group="Hill Condition")
-pivotRight  = input.int(5, "Hill Detection Right Bars (Confirmation Delay)", group="Hill Condition")
+pivotLeft   = input.int(5, "언덕 감지 좌측 봉수", group="언덕")
+pivotRight  = input.int(5, "언덕 감지 우측 봉수(확정 지연)", group="언덕")
+requireLowerHigh = input.bool(true, "하락 박스 요구 (고점 하락)", group="언덕",
+     tooltip="이번 언덕이 그 전 언덕보다 낮아야 돌파를 인정한다.\n끄면 횡보 박스 상단 돌파도 공구리 후보가 된다.")
+lowerHighPct = input.float(2.0, "고점 하락 인정 폭(%)", group="언덕",
+     tooltip="이번 언덕이 그 전 언덕보다 이 % 이상 낮아야 '하락 박스'로 본다.\n노이즈 수준의 차이로 횡보 박스가 통과하는 걸 막는다.")
 
-volLen      = input.int(20, "Volume Average Length", group="Breakout Condition")
-volMult     = input.float(1.5, "Volume Spike Multiplier", group="Breakout Condition")
+volLen      = input.int(20, "거래량 평균 기간", group="돌파")
+volMult     = input.float(1.5, "거래량 배수", group="돌파")
+volWindow   = input.int(5, "거래량 판정 윈도우(봉)", group="돌파",
+     tooltip="최근 이 봉수 중 최대 거래량을, 그 이전 구간의 평균과 비교한다.\n거래량이 터지는 봉과 종가가 언덕을 넘는 봉은 일치할 이유가 없고,\n현재 평균을 쓰면 돌파 랠리의 거래량이 평균을 끌어올려 배수 조건이 무력화된다.")
 
-// ── 1. Bottom zone check (reverse alignment + price below MAs) ──
+minRunupPct   = input.float(5.0, "되밀림 전 최소 상승폭(언덕 위 %)", group="공구리 확인",
+     tooltip="돌파 후 고가가 언덕보다 이 % 이상 올라간 적이 있어야 되밀림을 인정한다.\n없으면 돌파 다음 봉이 곧바로 '언덕에서 지지'로 잡힌다.")
+retestTolPct  = input.float(2.0, "언덕 닿음 인정 범위(언덕 위 %)", group="공구리 확인")
+failTolPct    = input.float(2.0, "돌파 실패 판정(언덕 아래 %)", group="공구리 확인")
+maxRetestWait = input.int(30, "돌파 후 되밀림 대기 최대 봉수", group="공구리 확인")
+
+useElliott     = input.bool(true, "엘리엇 1파 눌림 모드", group="엘리엇 1파")
+elliottNearPct = input.float(5.0, "언덕-장기선 근접 범위(%)", group="엘리엇 1파",
+     tooltip="1파 모드는 장기선 근처의 언덕을 뚫고 장기선 위로 올라선 돌파만 본다.")
+elliottMemory  = input.int(120, "바닥권 이력 유효기간(봉)", group="엘리엇 1파",
+     tooltip="이 봉수 안에 바닥권(역배열 + 이평선 아래)이었어야 한다.\n아무 상승 추세의 눌림을 1파로 보지 않기 위해서다.")
+
+showMa5Near = input.bool(false, "MA5-장기선 근접 표시(보조)", group="보조 표시",
+     tooltip="공구리 기법과는 무관한 보조 표시라 기본으로 끈다.")
+
+// ══════════════════════════════════════
+// 1. 바닥권 (역배열 + 이평선 아래)
+// ══════════════════════════════════════
 ma1 = ta.sma(close, maLen1)
 ma2 = ta.sma(close, maLen2)
+ma5 = ta.sma(close, 5)
 
 plot(ma1, title="MA Mid",  color=color.new(#b91e6b, 0), linewidth=2)
 plot(ma2, title="MA Long", color=color.green, linewidth=1)
+plot(ma5, title="MA5",     color=color.rgb(255, 255, 255), linewidth=2)
 
 isBelowMA      = close < ma1 and close < ma2
 isReverseAlign = ma1 < ma2
 isBottomZone   = isBelowMA and isReverseAlign
 
-// ── MA 5
-ma5  = ta.sma(close, 5)
-// ma448  = ta.sma(close, 448)
+// ta.barssince 는 매 봉 호출돼야 하므로 조건식 밖에서 계산한다
+barsSinceBottom = nz(ta.barssince(isBottomZone), 9999)
 
-plot(ma5,  title="MA5",  color=color.rgb(255, 255, 255), linewidth=2)
-// plot(ma448, title="MA448", color=color.new(#ff9900, 46), linewidth=1)
+bgcolor(isBottomZone ? color.new(color.blue, 80) : na, title="바닥권 배경")
 
-// ── MA5가 MA224에 근접 시 역삼각형 표시 (최초 근접 시점만) ──
-ma5NearLongPct = input.float(2.0, "MA5-장기선 근접 허용범위(%)", group="근접 조건")
-
-ma5NearLong = math.abs(ma5 - ma2) / ma2 * 100 <= ma5NearLongPct
-ma5NearLongJustNow = ma5NearLong and not ma5NearLong[1]
+// 보조: MA5 가 장기선에 근접한 순간 (기본 꺼짐)
+ma5NearLongPct     = input.float(2.0, "MA5-장기선 근접 허용범위(%)", group="보조 표시")
+ma5NearLong        = math.abs(ma5 - ma2) / ma2 * 100 <= ma5NearLongPct
+ma5NearLongJustNow = showMa5Near and ma5NearLong and not ma5NearLong[1]
 
 plotshape(ma5NearLongJustNow, title="MA5-장기선 근접", style=shape.triangledown,
      location=location.top, color=color.new(color.yellow, 0), size=size.small)
 
-
-// ── 2. Hill (previous swing high) tracking ──
+// ══════════════════════════════════════
+// 2. 언덕 (직전 스윙 고점) 추적
+// ══════════════════════════════════════
 pivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
 
-var float hillLevel       = na
-var int   hillBar         = na
-var bool  hillBreakMarked = false   // 산 1개당 돌파 마커 1회만 표시
+var float hillLevel = na
+var float prevHill  = na   // 그 전 언덕 — 고점 하락(하락 박스) 판정용
+var int   hillBar   = na
 
 if not na(pivotHigh)
-    hillLevel       := pivotHigh
-    hillBar         := bar_index - pivotRight
-    hillBreakMarked := false   // reset marker state for the new hill
+    prevHill  := hillLevel
+    hillLevel := pivotHigh
+    hillBar   := bar_index - pivotRight
 
-isBullishCandle = close > open
-bodySize   = close - open
-rangeSize  = high - low
-bodyRatio  = rangeSize > 0 ? bodySize / rangeSize : 0
-isStrongBody = bodyRatio >= 0.6
+isLowerHigh = not na(prevHill) and hillLevel <= prevHill * (1 - lowerHighPct / 100)
 
-breakHillHigh = not na(hillLevel) and high > hillLevel and isBullishCandle and isStrongBody and not hillBreakMarked
+// ══════════════════════════════════════
+// 3. 1단계 — 직전 언덕 돌파
+// ══════════════════════════════════════
+crossHill  = ta.crossover(close, hillLevel)   // 매 봉 호출
+volHighest = ta.highest(volume, volWindow)
+volBase    = ta.sma(volume, volLen)[volWindow]
+volSpike   = not na(volBase) and volHighest > volBase * volMult
 
-if breakHillHigh
-    hillBreakMarked := true
+modeDownBox = isBottomZone and (not requireLowerHigh or isLowerHigh)
+hillNearMa2 = not na(hillLevel) and math.abs(hillLevel - ma2) / ma2 * 100 <= elliottNearPct
+modeElliott = useElliott and not isBottomZone and close > ma2 and hillNearMa2
+     and barsSinceBottom <= elliottMemory
 
-plotshape(breakHillHigh, title="Hill Breakout Candle", style=shape.triangledown,
-     location=location.abovebar, color=color.new(color.green, 0), size=size.tiny)
-
-// ── 3. Breakout (Concrete) condition: hill breakout + volume spike + in bottom zone ──
-volSpike     = volume > ta.sma(volume, volLen) * volMult
-crossHill    = ta.crossover(close, hillLevel)   // always called every bar
-breakout     = not na(hillLevel) and crossHill
-concreteCond = breakout and volSpike and isBottomZone
-
-plotshape(concreteCond, title="Concrete", style=shape.labelup,
-     location=location.belowbar, color=color.new(#8B7355, 0),
-     textcolor=color.white, text="Concrete", size=size.small)
-
-// ── 4. Support line (breakout bar's open price as horizontal support) ──
-var line supportLine = na
-var float supportPrice = na
+var int   stage       = 0      // 0=대기, 1=돌파(되밀림 대기), 2=공구리 확인(지지 중)
+var float brokenHill  = na     // 돌파한 언덕 — 새 고점이 생겨도 이 값은 유지한다
+var int   brokenBar   = na     // 그 언덕이 찍힌 봉 (지지선 시작점)
+var int   breakoutBar = na
+var bool  ranUp       = false
+var bool  touched     = false
+var bool  boElliott   = false
+var float supportPrice  = na
 var bool  supportBroken = false
 
-if concreteCond
-    if not na(supportLine)
-        line.delete(supportLine)
-    supportLine := line.new(bar_index, open, bar_index + 1, open,
-         color=color.new(#8B7355, 0), style=line.style_dashed, width=2, extend=extend.right)
-    supportPrice := open
+breakout = stage != 1 and not na(hillLevel) and crossHill and volSpike
+     and (modeDownBox or modeElliott)
+
+if breakout
+    stage         := 1
+    brokenHill    := hillLevel
+    brokenBar     := hillBar
+    breakoutBar   := bar_index
+    ranUp         := false
+    touched       := false
+    boElliott     := modeElliott
     supportBroken := false
 
-// ── 5. Support break warning (stop-loss alert) ──
-// 돌파봉이 음봉이면 그 봉에서 바로 Loss가 뜨므로, 발생 봉 자체는 제외한다
-if not na(supportPrice) and not supportBroken and not concreteCond and close < supportPrice
+// ══════════════════════════════════════
+// 4. 2단계 — 되밀림에서 언덕이 지지되면 공구리 확정
+//    ranUp 은 이전 봉까지의 값을 쓴다. 판정 뒤에 갱신해야 돌파 직후 언덕 근처에
+//    머무는 봉이 곧바로 "되밀림"으로 잡히지 않는다.
+// ══════════════════════════════════════
+if stage == 1 and bar_index > breakoutBar and ranUp
+     and low <= brokenHill * (1 + retestTolPct / 100)
+    touched := true
+
+concrete = stage == 1 and bar_index > breakoutBar and touched
+     and close > brokenHill and close > open
+
+if stage == 1 and high >= brokenHill * (1 + minRunupPct / 100)
+    ranUp := true
+
+breakoutFail = false
+
+if concrete
+    stage        := 2
+    supportPrice := brokenHill
+else if stage == 1
+    if close < brokenHill * (1 - failTolPct / 100)
+        stage        := 0
+        breakoutFail := true
+    else if bar_index - breakoutBar > maxRetestWait
+        stage := 0
+
+// ══════════════════════════════════════
+// 5. 지지선 = 돌파한 언덕 가격. 종가로 이탈하면 Loss.
+// ══════════════════════════════════════
+var line supportLine = na
+
+if concrete
+    if not na(supportLine)
+        line.delete(supportLine)
+    supportLine := line.new(brokenBar, brokenHill, bar_index, brokenHill,
+         color=color.new(#8B7355, 0), style=line.style_solid, width=2, extend=extend.right)
+
+supportLost = stage == 2 and not concrete and close < supportPrice
+
+if supportLost
+    stage         := 0
     supportBroken := true
-    label.new(bar_index, low, "Loss", color=color.new(color.red, 0),
+    label.new(bar_index, low, "Loss\n(언덕 이탈)", color=color.new(color.red, 0),
          textcolor=color.white, style=label.style_label_up, size=size.small)
 
-// ── Hill marker (only shown for the hill that triggered a Concrete signal) ──
-if concreteCond
-    label.new(hillBar, hillLevel, "", style=label.style_circle,
-         color=color.new(color.orange, 20), size=size.tiny)
+// ══════════════════════════════════════
+// 6. 표시
+// ══════════════════════════════════════
+plotshape(breakout, title="1단계: 언덕 돌파", style=shape.flag,
+     location=location.abovebar, color=color.new(color.yellow, 0), size=size.tiny)
 
-bgcolor(isBottomZone ? color.new(color.blue, 80) : na, title="Bottom Zone (Reverse Align + Below MA) Background")
+plotshape(concrete and not boElliott, title="공구리 확정", style=shape.labelup,
+     location=location.belowbar, color=color.new(#8B7355, 0),
+     textcolor=color.white, text="공구리", size=size.small)
+
+plotshape(concrete and boElliott, title="공구리 확정 (1파 눌림)", style=shape.labelup,
+     location=location.belowbar, color=color.new(#8B7355, 0),
+     textcolor=color.white, text="공구리\n1파 눌림", size=size.small)
+
+plotshape(breakoutFail, title="돌파 실패", style=shape.xcross,
+     location=location.abovebar, color=color.new(color.red, 0), size=size.tiny)
+
+// 되밀림을 기다리는 동안 지켜야 할 언덕 높이를 점선으로
+plot(stage == 1 ? brokenHill : na, title="지켜야 할 언덕", color=color.new(#8B7355, 30),
+     style=plot.style_linebr, linewidth=1)
+
+if concrete
+    label.new(brokenBar, brokenHill, "", style=label.style_circle,
+         color=color.new(color.orange, 20), size=size.tiny)
 
 // ── Show each line's name as a label at the last bar ──
 if barstate.islast
@@ -135,7 +238,7 @@ if barstate.islast
          style=label.style_label_left, size=size.small)
 
 // ══════════════════════════════════════
-// 6. 상태 패널 (우상단 고정)
+// 7. 상태 패널 (우상단 고정)
 //    마지막 봉에 붙는 라벨은 스크롤·확대하면 화면에서 사라진다. 테이블은 고정된다.
 // ══════════════════════════════════════
 panelPos = input.string("top_right", "상태 패널 위치", group="상태 패널",
@@ -156,28 +259,30 @@ tblSize = panelSize == "small" ? size.small
 
 var table statusPanel = table.new(tblPos, 1, 2, border_width=1)
 
-holdingSupport = not na(supportPrice) and not supportBroken
-
 if barstate.islast
-    // 이 기법은 주가가 아직 장기선 아래에 있을 때만 판단한다.
-    // "돌파"는 장기선 돌파가 아니라 직전 중간고점(산) 돌파를 뜻하므로,
-    // 다른 스크립트(장기선 돌파)와 헷갈리지 않게 문구에 명시한다.
-    longName = "MA" + str.tostring(maLen2)
+    // "돌파"는 장기선 돌파가 아니라 직전 언덕 돌파다. 다른 스크립트와 헷갈리지 않게 명시한다.
+    modeTxt = boElliott ? " [1파 눌림]" : ""
 
-    stateTxt = supportBroken   ? "✗ 지지선 깨짐 — 손절 자리"
-         : holdingSupport      ? "● 산 넘음 (" + longName + "은 아직 위) — 지지선 버티는 중"
-         : isBottomZone        ? "● " + longName + " 아래 바닥권 — 산 넘기를 기다리는 중"
+    stateTxt = supportBroken   ? "✗ 언덕 지지 깨짐 — 손절 자리"
+         : stage == 2          ? "● 공구리 확인" + modeTxt + " — 언덕 지지 버티는 중"
+         : stage == 1 and not ranUp ? "② 언덕 돌파 — 더 올라가길 기다림"
+         : stage == 1          ? "③ 되밀림 기다리는 중 — 언덕에서 받치면 공구리"
+         : isBottomZone        ? "① 바닥권 — 하락 박스 돌파를 기다리는 중"
          : not isBelowMA       ? "관망 — 주가가 이평선 위 (아직 안 내렸음)"
          : "관망 — 아직 역배열 아님"
 
     stateBg = supportBroken ? color.new(color.red, 0)
-         : holdingSupport   ? color.new(color.green, 10)
+         : stage == 2       ? color.new(color.green, 10)
+         : stage == 1       ? color.new(color.orange, 10)
          : isBottomZone     ? color.new(color.blue, 20)
          : color.new(color.gray, 50)
 
-    hillTxt = na(hillLevel) ? "넘어야 할 산: 아직 없음"
-         : "넘어야 할 산: " + str.tostring(hillLevel, format.mintick)
+    hillTxt = stage == 1 ? "지켜야 할 언덕: " + str.tostring(brokenHill, format.mintick)
+         + "  (" + str.tostring((close - brokenHill) / brokenHill * 100, "#.#") + "%)"
+         : na(hillLevel) ? "넘어야 할 언덕: 아직 없음"
+         : "넘어야 할 언덕: " + str.tostring(hillLevel, format.mintick)
          + "  (" + str.tostring((hillLevel - close) / close * 100, "#.#") + "%)"
+         + (isLowerHigh ? "  고점 하락 ✓" : "  고점 하락 ✗")
 
     supTxt = na(supportPrice) ? "지지선: 아직 없음"
          : "지지선: " + str.tostring(supportPrice, format.mintick)

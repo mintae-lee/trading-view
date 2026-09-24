@@ -18,6 +18,9 @@ indicator("역배열 저평가 반등", overlay=true, max_labels_count=500, max_
 //   ⑤ 매물대 확인   위쪽에 매물벽이 얼마나 두터운지 본다. 얇으면 저항이 적어
 //                   잘 오르고(MaHit 의 "공짜 라인"과 같은 논리), 두터우면 그 벽이
 //                   1차 목표이자 손실 구간이 된다. 매수 조건은 아니고 판단 재료다.
+//   ⑥ V자 → 박스 → 224 돌파 (별도 표시, 매수 시퀀스와 독립)
+//                   224선 아래로 단기간에 크게 빠졌다가 빠르게 되오른 V자 뒤에
+//                   224선 아래 횡보 박스가 나오고, 224선과 박스 상단을 함께 돌파.
 //
 //   ⚠ 화면상 현재 봉에 그려지는 구름은 26봉 전에 계산된 값이다. 그래서
 //     "주가가 구름 위"는 senkouSpan[displacement-1] 과 비교해야 한다.
@@ -254,6 +257,117 @@ plot(stage > 0 ? maMid : na, title="진행 중 112선(손절 기준)",
 
 
 // ══════════════════════════════════════
+// 7-1. V자 급락·급반등 → 횡보 박스 → 224선 돌파
+//      ① V 바닥   바닥까지 vDropBars 봉 안의 최고가 대비 vDropPct 이상 급락했고,
+//                 바닥이 224선 아래 (피벗 저점이라 vPivotLen 봉 늦게 확정된다)
+//      ② V 완성   바닥 후 vRecoverBars 봉 안에 낙폭의 vRecoverRatio 이상 되돌림
+//      ③ 박스     V 완성 후 boxLen 봉 이상 지나, 최근 boxLen 봉의 고저 폭이
+//                 boxMaxPct 이내이고 종가가 224선 아래
+//      ④ 돌파     종가가 224선과 박스 상단을 모두 넘음
+//      박스 하단을 종가로 boxFailPct 넘게 깨거나 단계별 대기 한도를 넘기면 처음부터.
+//
+//      ⚠ 박스는 V 완성 "이후" 봉만으로 판정한다. V 오른쪽 급반등 구간이 섞이면
+//        폭이 커져 박스가 안 잡히고, 반대로 V 바닥 근처 횡보가 박스로 잡히면 안 된다.
+//
+//      검증: tools/vbox_check.py --selftest
+//        정상 10/10 신호. 완만한 U자·데드캣은 V 단계, V 후 곧장 상승은 박스 단계,
+//        박스 붕괴는 하단 이탈로 각각 걸러진다 (10/10).
+// ══════════════════════════════════════
+showVBox      = input.bool(true, "V자·박스·224 돌파 표시", group="V자 → 박스 → 224 돌파")
+vPivotLen     = input.int(5, "V 바닥 감지 봉수(좌우)", group="V자 → 박스 → 224 돌파")
+vDropBars     = input.int(30, "급락 인정 기간(봉)", group="V자 → 박스 → 224 돌파",
+     tooltip="V 바닥까지 이 봉수 안의 최고가 대비 낙폭을 본다. 길게 잡으면 완만한 하락도 V 가 된다.")
+vDropPct      = input.float(25.0, "최소 급락폭(%)", group="V자 → 박스 → 224 돌파")
+vRecoverBars  = input.int(30, "급반등 인정 기간(봉)", group="V자 → 박스 → 224 돌파")
+vRecoverRatio = input.float(50.0, "최소 반등률(낙폭 대비 %)", group="V자 → 박스 → 224 돌파",
+     tooltip="바닥 후 급반등 기간 안에 낙폭의 이 % 이상 되돌려야 V 로 본다.\n못 미치면 데드캣 반등이다.")
+boxLen        = input.int(15, "박스 최소 길이(봉)", group="V자 → 박스 → 224 돌파")
+boxMaxPct     = input.float(12.0, "박스 최대 폭(%)", group="V자 → 박스 → 224 돌파")
+boxFailPct    = input.float(3.0, "박스 하단 이탈 판정(%)", group="V자 → 박스 → 224 돌파")
+maxBoxWait    = input.int(60, "V 완성 후 박스 대기 최대 봉수", group="V자 → 박스 → 224 돌파")
+maxBoxBars    = input.int(150, "박스 유지 최대 봉수", group="V자 → 박스 → 224 돌파",
+     tooltip="박스가 시작된 뒤 이 봉수 안에 224선을 못 넘으면 패턴을 버린다.")
+
+// ta.* 는 매 봉 호출돼야 하므로 전부 전역에서 계산한다
+vPivot   = ta.pivotlow(low, vPivotLen, vPivotLen)
+vPreHigh = ta.highest(high, vDropBars)[vPivotLen]   // 피벗 봉에서 본 직전 최고가
+boxHi    = ta.highest(high, boxLen)
+boxLo    = ta.lowest(low, boxLen)
+boxWidth = boxLo > 0 ? (boxHi - boxLo) / boxLo * 100 : 100.0
+
+var int   vStage   = 0      // 0=대기, 1=V 바닥(반등 대기), 2=V 완성(박스 대기), 3=박스(돌파 대기)
+var float vLow     = na
+var int   vLowBar  = na
+var float vHigh    = na
+var int   vDoneBar = na
+var float boxTop   = na
+var float boxBot   = na
+var int   boxStart = na
+var box   vBox     = na
+
+vBottom = not na(vPivot) and not na(vPreHigh) and vPreHigh > 0
+     and (vPreHigh - vPivot) / vPreHigh * 100 >= vDropPct
+     and vPivot < maLong[vPivotLen]
+
+// 박스에서 돌파를 기다리는 중에는 새 V 를 받지 않는다 (박스가 깨지면 그때 다시)
+if vBottom and vStage != 3
+    vStage  := 1
+    vLow    := vPivot
+    vLowBar := bar_index - vPivotLen
+    vHigh   := vPreHigh
+
+vDone    = false
+boxFound = false
+vBreak   = false
+boxFail  = false
+
+if vStage == 1
+    if close >= vLow + (vHigh - vLow) * vRecoverRatio / 100
+        vStage   := 2
+        vDoneBar := bar_index
+        vDone    := true
+    else if bar_index - vLowBar > vRecoverBars
+        vStage := 0
+else if vStage == 2
+    if bar_index - vDoneBar >= boxLen and boxWidth <= boxMaxPct and close < maLong
+        vStage   := 3
+        boxTop   := boxHi
+        boxBot   := boxLo
+        boxStart := bar_index - boxLen + 1
+        boxFound := true
+    else if bar_index - vDoneBar > maxBoxWait
+        vStage := 0
+else if vStage == 3
+    if close > math.max(maLong, boxTop)
+        vStage := 0
+        vBreak := true
+    else if close < boxBot * (1 - boxFailPct / 100) or bar_index - boxStart > maxBoxBars
+        vStage  := 0
+        boxFail := true
+
+barsSinceVBreak = ta.barssince(vBreak)
+
+if showVBox
+    if vDone
+        label.new(vLowBar, vLow, "V", color=color.new(color.teal, 0), textcolor=color.white,
+             style=label.style_label_up, size=size.small)
+    if boxFound
+        vBox := box.new(boxStart, boxTop, bar_index, boxBot,
+             border_color=color.new(color.teal, 0), border_width=1,
+             bgcolor=color.new(color.teal, 88))
+    if vStage == 3 and not na(vBox)
+        box.set_right(vBox, bar_index)
+    if (vBreak or boxFail) and not na(vBox)
+        box.set_right(vBox, bar_index)
+    if boxFail and not na(vBox)
+        box.set_border_style(vBox, line.style_dotted)
+        box.set_bgcolor(vBox, color.new(color.gray, 90))
+
+plotshape(showVBox and vBreak, title="V·박스 224 돌파", style=shape.labelup,
+     location=location.belowbar, color=color.new(color.teal, 0),
+     textcolor=color.white, text="V·박스\n224돌파", size=size.small)
+
+// ══════════════════════════════════════
 // 8. 매물대 (Volume Profile)
 //    가격대를 vpBins 개로 쪼개고, 과거 vpLookback 봉의 거래량을 각 봉이 걸친
 //    구간에 "겹친 비율만큼" 나눠 담는다. 봉의 중간값 한 점에 전량을 몰아넣는
@@ -410,7 +524,7 @@ tblSize = panelSize == "small" ? size.small
      : panelSize == "huge" ? size.huge
      : size.normal
 
-var table statusPanel = table.new(tblPos, 1, 4, border_width=1)
+var table statusPanel = table.new(tblPos, 1, 5, border_width=1)
 
 if barstate.islast
     // 1행: 지금 이 종목이 이 기법의 대상인지
@@ -472,6 +586,22 @@ if barstate.islast
          : color.new(#FF9800, 25)
 
     table.cell(statusPanel, 0, 3, vpTxt, bgcolor=vpBg,
+         text_color=color.white, text_size=size.small)
+
+    // 5행: V자 → 박스 → 224 돌파
+    vTxt = vStage == 1 ? "V 바닥 확인 — 급반등 기다림 (" + str.tostring(bar_index - vLowBar) + "/" + str.tostring(vRecoverBars) + "봉)"
+         : vStage == 2 ? "V자 완성 — 224선 아래 횡보 박스 기다림"
+         : vStage == 3 ? "박스 횡보 중 — 돌파 기준 " + str.tostring(math.max(maLong, boxTop), format.mintick)
+           + " (" + str.tostring((math.max(maLong, boxTop) - close) / close * 100, "#.#") + "% 위)"
+         : not na(barsSinceVBreak) and barsSinceVBreak <= 20 ? "V·박스 224 돌파 " + str.tostring(barsSinceVBreak) + "봉 전"
+         : "V자 → 박스 패턴 없음"
+
+    vBg = vStage == 3 ? color.new(color.teal, 20)
+         : vStage > 0 ? color.new(color.teal, 50)
+         : not na(barsSinceVBreak) and barsSinceVBreak <= 20 ? color.new(color.teal, 0)
+         : color.new(color.gray, 60)
+
+    table.cell(statusPanel, 0, 4, vTxt, bgcolor=vBg,
          text_color=color.white, text_size=size.small)
 
 // ══════════════════════════════════════

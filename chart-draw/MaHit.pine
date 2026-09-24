@@ -8,9 +8,14 @@ indicator("이평때리기", overlay=true)
 // 기법 개요
 //   큰 하락 이후 바닥권에서 주가가 회복하는 상승 초입을 잡는다.
 //
-//   원리   급락하면 주가와 장기 이평선의 이격이 크게 벌어진다.
-//          그 상태에서 주가가 112일선을 뚫고 "안착"하면 세력 개입 신호로 보고,
-//          224일선 → 448일선까지의 회복을 기대한다.
+//   원리   많이 빠졌던 주가가 역배열 상태에서 112일선을 돌파하면 머리 위의
+//          224일선이나 448일선까지 한 번 도전을 한다.
+//          "작은 형님을 먼저 깨고 큰 형님한테 덤빈다."
+//
+//   시퀀스 ① 112일선 돌파·안착          ← 매수 (BUY)
+//          ② 224일선을 때림             → 1차 도달. 맞고 빠지는 게 정상이다
+//          ③ 다시 힘을 모아 224선 안착  ← 448 도전 시작 (224↑)
+//          ④ 448일선을 때림             → 2차 도달, 종료
 //
 //   공짜 라인   112일선 안착 후 224일선까지의 구간. 위에 매물벽이 얇아
 //               비교적 저항 없이 오르는 구간으로 본다.
@@ -49,14 +54,23 @@ isReverseAlign = emaMid < emaLong and emaLong < emaXLong
 bgcolor(isReverseAlign ? color.new(color.red, 90) : na, title="역배열 배경")
 
 // ══════════════════════════════════════
-// 2. 이격 — 급락으로 벌어진 정도
+// 2. "많이 빠졌던" — 448선 아래로 크게 벌어진 적이 있는가
+//    ⚠ 예전에는 "최근 60봉 안에 112선 대비 -10% 이격"으로 판정했다. 그런데 바닥이
+//      길어지면 EMA112 가 내려와 주가에 붙어버려, 이미지처럼 긴 바닥을 다진 뒤의
+//      112 돌파가 전부 탈락했다 (합성: 바닥 200·300봉에서 0/20).
+//      448선은 느리게 움직여 바닥 내내 크게 벌어져 있으므로 바닥 길이에 흔들리지 않는다.
+//      합성 검증: 급락 패턴은 바닥 60~300봉 모두 90~95% 통과,
+//                 완만한 조정(-15%)은 최대 이격 28% 라 0건.
 // ══════════════════════════════════════
-minGapPct    = input.float(10.0, "최소 이격(%)", group="이격 조건",
-     tooltip="주가가 중기선보다 이 % 이상 아래로 벌어진 적이 있어야 한다.\n급락 없이 그냥 눌린 종목을 걸러낸다.")
-gapLookback  = input.int(60, "이격 확인 기간(봉)", group="이격 조건")
+deepLookback = input.int(250, "하락 확인 기간(봉)", group="하락 조건",
+     tooltip="약 1년. 이 기간 중 주가가 초장기선 아래로 크게 벌어진 적이 있어야 한다.")
+minDeepPct   = input.float(35.0, "초장기선 대비 최소 이격(%)", group="하락 조건",
+     tooltip="주가가 초장기선(448)보다 이 % 이상 아래로 벌어진 적이 있어야 '많이 빠졌던' 주가로 본다.\n급락 없이 그냥 눌린 종목을 걸러낸다. 합성 기준 완만한 조정은 최대 28%.")
 
-gapPct     = (close - emaMid) / emaMid * 100
-hadDeepGap = ta.lowest(gapPct, gapLookback) <= -minGapPct
+gapPct     = (close - emaMid) / emaMid * 100          // 패널 표시용
+distXLong  = (emaXLong - close) / close * 100         // 초장기선까지 남은 거리
+maxDist    = ta.highest(distXLong, deepLookback)
+hadDeepGap = maxDist >= minDeepPct
 
 // ══════════════════════════════════════
 // 3. 역배열 확장 → 수축 전환
@@ -99,17 +113,35 @@ plotshape(buySignal, title="이평때리기 매수", style=shape.triangleup,
 var bool  inPosition = false
 var float entryPrice = na
 var bool  hitTarget1 = false
+var bool  brokeLong  = false   // 224선을 맞고 빠진 뒤 다시 올라가 안착했는가
 
 if buySignal and not inPosition
     inPosition := true
     entryPrice := close
     hitTarget1 := false
+    brokeLong  := false
 
-// 1차 목표: 장기선 도달 (= 공짜 라인 끝)
+// 1차 목표: 장기선 도달 (= 공짜 라인 끝). 여기서 맞고 빠지는 게 정상이다.
 if inPosition and not hitTarget1 and high >= emaLong
     hitTarget1 := true
-    label.new(bar_index, high, "1차 도달\n장기선", color=color.new(color.green, 20),
+    label.new(bar_index, high, "1차 도달\n장기선 때림", color=color.new(color.green, 20),
          textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// 다시 힘을 모아 장기선 위에 안착하면 초장기선 도전 시작 (이미지의 두 번째 화살표).
+// 안착 판정은 112선과 같은 settleBars — 한 번 넘는 것으로는 부족하다.
+aboveLong       = close > emaLong
+barsAboveLong   = nz(ta.barssince(not aboveLong), 9999)
+longSettled     = aboveLong and barsAboveLong >= settleBars
+longJustSettled = longSettled and not longSettled[1]
+
+longBreak = inPosition and hitTarget1 and not brokeLong and longJustSettled
+
+if longBreak
+    brokeLong := true
+
+plotshape(longBreak, title="224선 안착 — 448 도전", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.aqua, 0),
+     textcolor=color.aqua, size=size.small, text="224↑")
 
 // 2차 목표: 초장기선 도달 → 포지션 종료
 if inPosition and high >= emaXLong
@@ -150,15 +182,18 @@ var table statusPanel = table.new(tblPos, 1, 2, border_width=1)
 
 if barstate.islast
     // 왜 아직 못 사는지를 한 줄로 알려준다
-    stateTxt = inPosition           ? "● 보유 중 — 공짜 라인 진행"
+    stateTxt = inPosition and brokeLong  ? "● 보유 중 — 224선 넘음, 448선 도전 중"
+         : inPosition and hitTarget1 ? "● 보유 중 — 224선 때림, 다시 힘 모으는 중"
+         : inPosition                ? "● 보유 중 — 공짜 라인 진행 (224선까지)"
          : not isReverseAlign       ? "관망 — 역배열 아님 (아직 안 내렸음)"
-         : not hadDeepGap           ? "관망 — 이격이 부족 (급락이 없었음)"
+         : not hadDeepGap           ? "관망 — 덜 빠짐 (448선 대비 최대 " + str.tostring(maxDist, "#") + "%)"
          : not isContracting        ? "① 이격 벌어지는 중 — 좁혀지길 기다림"
          : not aboveMid             ? "② 수축 시작 — 중기선 올라서길 기다림"
          : "③ 중기선 위 — 안착 확인 중 (" + str.tostring(barsAbove) + "/"
            + str.tostring(settleBars) + "봉)"
 
-    stateBg = inPosition      ? color.new(color.green, 10)
+    stateBg = inPosition and brokeLong ? color.new(color.teal, 10)
+         : inPosition        ? color.new(color.green, 10)
          : not isReverseAlign ? color.new(color.gray, 50)
          : not hadDeepGap     ? color.new(color.gray, 50)
          : not isContracting  ? color.new(color.red, 30)
