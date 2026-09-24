@@ -1,0 +1,31 @@
+# macOS Finder
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Market data exported from TradingView (inputs for tools/*.py)
+data/
+*.csv
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Env / secrets
+.env
+.env.*
